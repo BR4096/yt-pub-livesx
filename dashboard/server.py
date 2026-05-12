@@ -6,6 +6,7 @@ Reads/writes to local SQLite database and syncs with YouTube channel.
 
 import json
 import os
+import shutil
 import sys
 import time
 import base64
@@ -229,7 +230,6 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
     def _handle_health_ping(self):
         """Lightweight no-auth health check for master-dashboard polling."""
-        import shutil
         scheduler_state = 'offline'
         try:
             status_file = os.path.join(os.path.dirname(__file__), 'scheduler_status.json')

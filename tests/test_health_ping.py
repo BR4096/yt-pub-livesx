@@ -44,22 +44,15 @@ def test_health_ping_offline_when_no_status_file(tmp_path):
 
 def test_health_ping_reads_scheduler_status(tmp_path):
     """Returns scheduler state from scheduler_status.json when present."""
-    # Write a fake scheduler_status.json in the dashboard/ dir
-    import dashboard
-    import pathlib
-    # dashboard/ is a namespace package (no __init__.py), so __file__ is None;
-    # use submodule_search_locations to get the actual directory.
-    dashboard_dir = pathlib.Path(list(dashboard.__spec__.submodule_search_locations)[0])
-    status_file = dashboard_dir / 'scheduler_status.json'
-    status_file.write_text('{"state": "cortando", "detail": "test"}')
-    try:
-        with patch.dict('os.environ', {'LIVES_DIR': str(tmp_path), 'INSTANCE_NAME': 'test'}):
-            import dashboard.server as srv
-            importlib.reload(srv)
+    status_file = tmp_path / 'scheduler_status.json'
+    status_file.write_text('{"state": "cortando"}')
+    with patch.dict('os.environ', {'LIVES_DIR': str(tmp_path), 'INSTANCE_NAME': 'test'}):
+        import dashboard.server as srv
+        importlib.reload(srv)
+        # Redirect __file__ so dirname(__file__) resolves to tmp_path
+        with patch.object(srv, '__file__', str(tmp_path / 'server.py')):
             h = make_handler(srv)
             h._handle_health_ping()
             h.wfile.seek(0)
             payload = json.loads(h.wfile.read())
             assert payload['scheduler_state'] == 'cortando'
-    finally:
-        status_file.unlink(missing_ok=True)
