@@ -25,7 +25,6 @@ def test_login_blocked_after_max_attempts():
 
         for _ in range(5):
             h = make_handler(srv)
-            srv._LOGIN_ATTEMPTS.get  # ensure dict exists
             h._handle_login({'password': 'wrong'})
 
         # 6th attempt — must be rate-limited

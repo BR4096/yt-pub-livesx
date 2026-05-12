@@ -7,6 +7,7 @@ Reads/writes to local SQLite database and syncs with YouTube channel.
 import json
 import os
 import sys
+import time
 import base64
 import urllib.request
 import urllib.parse
@@ -181,7 +182,6 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
     def _handle_login(self, data):
         global _DASHBOARD_PASSWORD
-        import time
         ip = self.client_address[0]
         now = time.time()
 
@@ -191,6 +191,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 _LOGIN_ATTEMPTS[ip] = attempts
                 self.send_response(429)
                 self.send_header('Content-Type', 'application/json')
+                self.send_header('Retry-After', str(_LOGIN_WINDOW_SECONDS))
                 self.end_headers()
                 self.wfile.write(b'{"ok":false,"error":"too many attempts"}')
                 return
