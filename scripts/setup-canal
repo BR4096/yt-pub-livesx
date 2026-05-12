@@ -71,7 +71,46 @@ echo ""
 read -rp "Senha do dashboard [Inema2026\$\$\$]: " DASHBOARD_PASSWORD
 [ -z "$DASHBOARD_PASSWORD" ] && DASHBOARD_PASSWORD='Inema2026$$$'
 
-# ============= F. Operacao =============
+# ============= F. Validacao de credenciais =============
+echo ""
+echo "==> Validating credentials..."
+
+# CLIENT_ID format
+if [[ "$CLIENT_ID" != *.apps.googleusercontent.com ]]; then
+  echo "  WARNING: CLIENT_ID does not end with .apps.googleusercontent.com"
+  echo "           Expected format: <numbers>-<hash>.apps.googleusercontent.com"
+  read -rp "  Continue anyway? [s/N]: " _PROCEED
+  [[ "${_PROCEED:-n}" =~ ^[sSyY]$ ]] || { echo "Cancelled."; exit 1; }
+fi
+
+# CLIENT_SECRET format
+if [[ "$CLIENT_SECRET" != GOCSPX-* ]]; then
+  echo "  WARNING: CLIENT_SECRET does not start with GOCSPX-"
+  read -rp "  Continue anyway? [s/N]: " _PROCEED
+  [[ "${_PROCEED:-n}" =~ ^[sSyY]$ ]] || { echo "Cancelled."; exit 1; }
+fi
+
+# API_KEY live test (non-blocking on network failure)
+echo -n "  Testing API_KEY against YouTube... "
+_API_TEST=$(curl -sf --max-time 10 \
+  "https://www.googleapis.com/youtube/v3/channels?part=id&id=${ORIG}&key=${API_KEY}" \
+  2>/dev/null || echo "__CURL_FAILED__")
+
+if [ "$_API_TEST" = "__CURL_FAILED__" ]; then
+  echo "no network (skipping)"
+elif echo "$_API_TEST" | grep -q '"error"'; then
+  _ERR_MSG=$(echo "$_API_TEST" | python3 -c \
+    "import sys,json; d=json.load(sys.stdin); print(d.get('error',{}).get('message','unknown'))" \
+    2>/dev/null || echo "unknown")
+  echo "FAILED"
+  echo "  ERROR: API_KEY rejected by YouTube: $_ERR_MSG"
+  read -rp "  Continue anyway? [s/N]: " _PROCEED
+  [[ "${_PROCEED:-n}" =~ ^[sSyY]$ ]] || { echo "Cancelled."; exit 1; }
+else
+  echo "OK"
+fi
+
+# ============= G. Operacao =============
 read -rp "Adicionar ao sync-instances do template? [s/N]: " SYNC
 
 # ============= Resumo + confirmacao =============
