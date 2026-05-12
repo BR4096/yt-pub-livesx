@@ -529,7 +529,6 @@ def handle_thumbnail(video_id, title, description, config):
         if os.path.exists(thumb_path):
             thumbs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lives', 'thumbs')
             os.makedirs(thumbs_dir, exist_ok=True)
-            import shutil
             saved_path = os.path.join(thumbs_dir, f'{video_id}.jpg')
             shutil.copy2(thumb_path, saved_path)
 
@@ -729,7 +728,6 @@ def _enrich_single_live(vid, live, config):
         if thumb_path and os.path.exists(thumb_path):
             thumbs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lives', 'thumbs')
             os.makedirs(thumbs_dir, exist_ok=True)
-            import shutil
             shutil.copy2(thumb_path, os.path.join(thumbs_dir, f'{vid}.jpg'))
             try:
                 upload_thumbnail(vid, thumb_path)
