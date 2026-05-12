@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Upload thumbnails pendentes para o YouTube.
-Usa as imagens ja geradas em lives/thumbs/
-Rodar quando a cota do YouTube resetar (meia-noite PT).
+"""Upload pending thumbnails to YouTube.
+Uses images already generated in lives/thumbs/
+Run when the YouTube quota resets (midnight PT).
 """
 import json, sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
@@ -23,7 +23,7 @@ for i, clip in enumerate(clips, 1):
     thumb_path = os.path.join(THUMB_DIR, f'{vid}.jpg')
 
     if not os.path.exists(thumb_path):
-        print(f'[{i}/{len(clips)}] SEM IMAGEM: {title[:50]}')
+        print(f'[{i}/{len(clips)}] NO IMAGE: {title[:50]}')
         remaining.append(clip)
         continue
 
@@ -35,16 +35,16 @@ for i, clip in enumerate(clips, 1):
     except Exception as e:
         err_msg = str(e)
         if 'quota' in err_msg.lower():
-            print(f'  QUOTA EXCEDIDA - parando')
+            print(f'  QUOTA EXCEEDED - stopping')
             remaining.append(clip)
             remaining.extend(clips[i:])
             break
         errors += 1
-        print(f'  ERRO: {e}', flush=True)
+        print(f'  ERROR: {e}', flush=True)
         remaining.append(clip)
 
 # Update pending file
 with open(PENDING_FILE, 'w') as f:
     json.dump(remaining, f, indent=2, ensure_ascii=False)
 
-print(f'\n=== {success} uploaded, {errors} erros, {len(remaining)} pendentes ===')
+print(f'\n=== {success} uploaded, {errors} errors, {len(remaining)} pending ===')
