@@ -227,6 +227,34 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         self.send_header('Location', '/login')
         self.end_headers()
 
+    def _handle_health_ping(self):
+        """Lightweight no-auth health check for master-dashboard polling."""
+        import shutil
+        scheduler_state = 'offline'
+        try:
+            status_file = os.path.join(os.path.dirname(__file__), 'scheduler_status.json')
+            if os.path.exists(status_file):
+                with open(status_file) as f:
+                    st = json.load(f)
+                scheduler_state = st.get('state', 'offline')
+        except Exception:
+            pass
+
+        disk_free_gb = None
+        try:
+            lives_dir = os.environ.get('LIVES_DIR', os.path.join(PROJECT_ROOT, 'lives'))
+            check_path = lives_dir if os.path.exists(lives_dir) else PROJECT_ROOT
+            disk_free_gb = round(shutil.disk_usage(check_path).free / (1024 ** 3), 1)
+        except Exception:
+            pass
+
+        self.send_json(200, {
+            'ok': True,
+            'instance': os.environ.get('INSTANCE_NAME', 'yt-pub-lives'),
+            'scheduler_state': scheduler_state,
+            'disk_free_gb': disk_free_gb,
+        })
+
     def _handle_password_change(self, data):
         global _DASHBOARD_PASSWORD
         current = data.get('current', '')
@@ -265,6 +293,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self.send_header('Content-Type', 'text/html; charset=utf-8')
             self.end_headers()
             self.wfile.write(_LOGIN_HTML.encode())
+            return
+
+        if path == '/api/health/ping':
+            self._handle_health_ping()
             return
 
         if not self._require_auth():
