@@ -91,23 +91,28 @@ if [[ "$CLIENT_SECRET" != GOCSPX-* ]]; then
 fi
 
 # API_KEY live test (non-blocking on network failure)
-echo -n "  Testing API_KEY against YouTube... "
-_API_TEST=$(curl -sf --max-time 10 \
-  "https://www.googleapis.com/youtube/v3/channels?part=id&id=${ORIG}&key=${API_KEY}" \
-  2>/dev/null || echo "__CURL_FAILED__")
-
-if [ "$_API_TEST" = "__CURL_FAILED__" ]; then
-  echo "no network (skipping)"
-elif echo "$_API_TEST" | grep -q '"error"'; then
-  _ERR_MSG=$(echo "$_API_TEST" | python3 -c \
-    "import sys,json; d=json.load(sys.stdin); print(d.get('error',{}).get('message','unknown'))" \
-    2>/dev/null || echo "unknown")
-  echo "FAILED"
-  echo "  ERROR: API_KEY rejected by YouTube: $_ERR_MSG"
-  read -rp "  Continue anyway? [s/N]: " _PROCEED
-  [[ "${_PROCEED:-n}" =~ ^[sSyY]$ ]] || { echo "Cancelled."; exit 1; }
+# Validate ORIG format before interpolating into URL
+if [[ ! "$ORIG" =~ ^UC[A-Za-z0-9_-]{22}$ ]]; then
+  echo "  WARNING: ORIG channel ID format unexpected (expected ^UC[A-Za-z0-9_-]{22}$), skipping API_KEY test"
 else
-  echo "OK"
+  echo -n "  Testing API_KEY against YouTube... "
+  _API_TEST=$(curl -sf --max-time 10 \
+    "https://www.googleapis.com/youtube/v3/channels?part=id&id=${ORIG}&key=${API_KEY}" \
+    2>/dev/null || echo "__CURL_FAILED__")
+
+  if [ "$_API_TEST" = "__CURL_FAILED__" ]; then
+    echo "no network (skipping)"
+  elif echo "$_API_TEST" | python3 -c "import sys,json,sys; sys.exit(0 if 'error' in json.load(sys.stdin) else 1)" 2>/dev/null; then
+    _ERR_MSG=$(echo "$_API_TEST" | python3 -c \
+      "import sys,json; d=json.load(sys.stdin); print(d.get('error',{}).get('message','unknown'))" \
+      2>/dev/null || echo "unknown")
+    echo "FAILED"
+    echo "  ERROR: API_KEY rejected by YouTube: $_ERR_MSG"
+    read -rp "  Continue anyway? [s/N]: " _PROCEED
+    [[ "${_PROCEED:-n}" =~ ^[sSyY]$ ]] || { echo "Cancelled."; exit 1; }
+  else
+    echo "OK"
+  fi
 fi
 
 # ============= G. Operacao =============
@@ -125,7 +130,7 @@ cat <<INFO
     GCP:       $GCP_PROJECT
 INFO
 read -rp "Confirma? [S/n]: " OK
-[[ "${OK:-s}" =~ ^[sSyY]$ ]] || { echo "Cancelado."; exit 0; }
+[[ "${OK:-s}" =~ ^[sSyY]$ ]] || { echo "Cancelado."; exit 1; }
 
 # ============= 1. Copia template =============
 echo ""
