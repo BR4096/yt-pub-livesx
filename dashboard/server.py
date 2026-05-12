@@ -35,6 +35,11 @@ import secrets as _sec
 
 _DASHBOARD_PASSWORD = os.environ.get('DASHBOARD_PASSWORD', 'Inema2026$$$')
 _VALID_SESSIONS = set()
+import threading as _threading
+_LOGIN_ATTEMPTS: dict = {}   # ip -> [timestamp, ...]
+_LOGIN_LOCK = _threading.Lock()
+_MAX_LOGIN_ATTEMPTS = 5
+_LOGIN_WINDOW_SECONDS = 300  # 5-minute window
 
 _LOGIN_HTML = '''<!doctype html>
 <html lang="pt-br">
@@ -176,7 +181,23 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
     def _handle_login(self, data):
         global _DASHBOARD_PASSWORD
+        import time
+        ip = self.client_address[0]
+        now = time.time()
+
+        with _LOGIN_LOCK:
+            attempts = [t for t in _LOGIN_ATTEMPTS.get(ip, []) if now - t < _LOGIN_WINDOW_SECONDS]
+            if len(attempts) >= _MAX_LOGIN_ATTEMPTS:
+                _LOGIN_ATTEMPTS[ip] = attempts
+                self.send_response(429)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(b'{"ok":false,"error":"too many attempts"}')
+                return
+
         if data.get('password') == _DASHBOARD_PASSWORD:
+            with _LOGIN_LOCK:
+                _LOGIN_ATTEMPTS.pop(ip, None)
             token = _sec.token_hex(32)
             _VALID_SESSIONS.add(token)
             self.send_response(200)
@@ -185,6 +206,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b'{"ok":true}')
         else:
+            with _LOGIN_LOCK:
+                attempts = [t for t in _LOGIN_ATTEMPTS.get(ip, []) if now - t < _LOGIN_WINDOW_SECONDS]
+                attempts.append(now)
+                _LOGIN_ATTEMPTS[ip] = attempts
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
