@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Scheduler para pipeline yt-pub-lives.
-Roda em loop, checa a cada minuto se esta na hora de cortar ou publicar.
-Le configuracao do banco SQLite local.
+Scheduler for the yt-pub-lives pipeline.
+Runs in a loop, checking every minute whether it is time to cut or publish.
+Reads configuration from the local SQLite database.
 """
 
 import json
@@ -45,14 +45,14 @@ def log(msg):
 
 
 def update_status(state, detail='', video_id='', step='', clip_id='', clip_title=''):
-    """Escreve status atual do scheduler em JSON para o dashboard ler."""
+    """Writes the current scheduler status to JSON for the dashboard to read."""
     data = {
-        'state': state,        # idle | cortando | publicando | erro
+        'state': state,        # idle | cutting | publishing | error
         'detail': detail,
         'video_id': video_id,
         'clip_id': clip_id,
         'clip_title': clip_title,
-        'step': step,          # etapa atual: transcricao | analise | download | corte | thumbnail | upload
+        'step': step,          # current step: transcription | analysis | download | cut | thumbnail | upload
         'updated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     }
     try:
@@ -87,18 +87,18 @@ def get_access_token():
 
 
 def load_config():
-    """Le CONFIG do banco local."""
+    """Reads CONFIG from the local database."""
     return db.load_config()
 
 
 def get_pending_lives():
-    """Retorna lives (mais antigas primeiro)."""
+    """Returns lives (oldest first)."""
     return db.get_lives()
 
 
 def get_matching_schedule(horarios_str):
-    """Retorna o horario agendado que bate com agora, ou None.
-    Suporta HH:00 (hora cheia) e HH:MM (minuto exato)."""
+    """Returns the scheduled time that matches now, or None.
+    Supports HH:00 (top of hour) and HH:MM (exact minute)."""
     if not horarios_str:
         return None
     now_hm = datetime.now().strftime('%H:%M')
@@ -113,15 +113,15 @@ def get_matching_schedule(horarios_str):
 
 
 def run_corte(video_id, config=None):
-    """Executa yt-clip para uma live, atualizando status por etapa."""
-    log(f'  Executando corte: {video_id}')
-    update_status('cortando', f'Baixando transcricao...', video_id, step='transcricao')
+    """Runs yt-clip for a live, updating status per step."""
+    log(f'  Running cut: {video_id}')
+    update_status('cutting', f'Downloading transcript...', video_id, step='transcription')
     script = os.path.join(SCRIPTS_DIR, 'yt-clip')
     env = os.environ.copy()
     env['LIVES_DIR'] = LIVES_DIR
     env['PATH'] = f"{os.path.expanduser('~/.deno/bin')}:/usr/bin:{os.path.expanduser('~/.local/bin')}:{SCRIPTS_DIR}:{env.get('PATH', '')}"
 
-    # Modo de analise: claude-api | anthropic-api | openrouter-api | piramyd-api
+    # Analysis mode: claude-api | anthropic-api | openrouter-api | piramyd-api
     ai_mode = 'claude-api'
     if config:
         ai_mode = config.get('ai_mode', 'claude-api')
@@ -150,11 +150,11 @@ def run_corte(video_id, config=None):
     output_lines = []
     last_logged_pct = -10
     step_map = {
-        '[1/5]': ('transcricao', 'Baixando transcricao...'),
-        '[2/5]': ('analise_transcript', 'Processando transcricao...'),
-        '[3/5]': ('analise', 'Analisando topicos com IA...'),
-        '[4/5]': ('corte', 'Baixando video e cortando clips...'),
-        '[5/5]': ('publicacao', 'Finalizando...'),
+        '[1/5]': ('transcription', 'Downloading transcript...'),
+        '[2/5]': ('transcript_analysis', 'Processing transcript...'),
+        '[3/5]': ('analysis', 'Analyzing topics with AI...'),
+        '[4/5]': ('cut', 'Downloading video and cutting clips...'),
+        '[5/5]': ('publication', 'Finishing...'),
     }
 
     for line in proc.stdout:
@@ -163,7 +163,7 @@ def run_corte(video_id, config=None):
             continue
         output_lines.append(line)
 
-        # Filtra linhas de download do yt-dlp (logar apenas a cada 10%)
+        # Filter yt-dlp download lines (log only every 10%)
         if '[download]' in line and '%' in line:
             try:
                 pct = float(line.split('%')[0].split()[-1])
@@ -174,27 +174,27 @@ def run_corte(video_id, config=None):
                 pass
 
         log(f'    | {line}')
-        # Detecta etapa pelo marcador [N/5]
+        # Detect step from [N/5] marker
         for marker, (step, label) in step_map.items():
             if marker in line:
-                update_status('cortando', label, video_id, step=step)
+                update_status('cutting', label, video_id, step=step)
                 break
 
     proc.wait()
 
     if proc.returncode == 0:
-        log(f'  Corte concluido: {video_id}')
-        update_status('idle', f'Corte concluido: {video_id}', video_id)
+        log(f'  Cut completed: {video_id}')
+        update_status('idle', f'Cut completed: {video_id}', video_id)
         return True
     else:
-        last_output = '\n'.join(output_lines[-5:]) if output_lines else 'sem output'
-        log(f'  Erro no corte: {last_output}')
-        update_status('erro', f'Erro no corte: {video_id}', video_id)
+        last_output = '\n'.join(output_lines[-5:]) if output_lines else 'no output'
+        log(f'  Cut error: {last_output}')
+        update_status('error', f'Cut error: {video_id}', video_id)
         return False
 
 
 def refine_pub_with_ai(title, description, config, video_id=''):
-    """Usa Claude CLI (OAuth) para refinar titulo e descricao antes de publicar."""
+    """Uses Claude CLI (OAuth) to refine title and description before publishing."""
     prompt_file = os.path.join(CONFIG_DIR, 'prompt_pub.txt')
     if not os.path.exists(prompt_file):
         return title, description
@@ -204,11 +204,11 @@ def refine_pub_with_ai(title, description, config, video_id=''):
     if not system_prompt:
         return title, description
 
-    user_msg = f'Titulo original: "{title}"\nDescricao original: "{description}"\nVideo ID da live original: {video_id}'
+    user_msg = f'Original title: "{title}"\nOriginal description: "{description}"\nOriginal live video ID: {video_id}'
     full_prompt = f'{system_prompt}\n\n---\n\n{user_msg}'
 
     try:
-        log(f'  Refinando titulo/descricao com Claude CLI...')
+        log(f'  Refining title/description with Claude CLI...')
         env = os.environ.copy()
         env.pop('CLAUDECODE', None)
         result = subprocess.run(
@@ -216,7 +216,7 @@ def refine_pub_with_ai(title, description, config, video_id=''):
             capture_output=True, text=True, timeout=120, env=env
         )
         if result.returncode != 0:
-            log(f'  Claude CLI erro (code {result.returncode}): {result.stderr[:200]}, usando originais')
+            log(f'  Claude CLI error (code {result.returncode}): {result.stderr[:200]}, using originals')
             return title, description
 
         data = json.loads(result.stdout)
@@ -228,21 +228,21 @@ def refine_pub_with_ai(title, description, config, video_id=''):
             refined = json.loads(json_match.group())
             new_title = refined.get('title', title)
             new_desc = refined.get('description', description)
-            log(f'  Titulo refinado: {new_title[:60]}')
+            log(f'  Refined title: {new_title[:60]}')
             return new_title, new_desc
         else:
-            log(f'  IA nao retornou JSON valido, usando originais')
+            log(f'  AI did not return valid JSON, using originals')
             return title, description
     except Exception as e:
-        log(f'  Erro ao refinar com IA: {e}, usando originais')
+        log(f'  Error refining with AI: {e}, using originals')
         return title, description
 
 
 def run_publicacao(video_id, clip_file, title, description, tags, privacy):
-    """Executa yt-publish para um clip."""
-    log(f'  Publicando: {title[:60]}')
-    log(f'  Arquivo: {clip_file} ({os.path.getsize(clip_file) / 1024 / 1024:.1f} MB)')
-    update_status('publicando', f'Publicando: {title[:50]}', video_id, step='upload')
+    """Runs yt-publish for a clip."""
+    log(f'  Publishing: {title[:60]}')
+    log(f'  File: {clip_file} ({os.path.getsize(clip_file) / 1024 / 1024:.1f} MB)')
+    update_status('publishing', f'Publishing: {title[:50]}', video_id, step='upload')
     script = os.path.join(SCRIPTS_DIR, 'yt-publish')
     env = os.environ.copy()
     env['PATH'] = f"{os.path.expanduser('~/.deno/bin')}:/usr/bin:{os.path.expanduser('~/.local/bin')}:{SCRIPTS_DIR}:{env.get('PATH', '')}"
@@ -268,7 +268,7 @@ def run_publicacao(video_id, clip_file, title, description, tags, privacy):
 
         proc.wait(timeout=600)  # 10 min max per upload
     except subprocess.TimeoutExpired:
-        log(f'  TIMEOUT: publicacao excedeu 10 min, matando processo')
+        log(f'  TIMEOUT: publication exceeded 10 min, killing process')
         proc.kill()
         proc.wait()
         return None
@@ -276,11 +276,11 @@ def run_publicacao(video_id, clip_file, title, description, tags, privacy):
     if proc.returncode == 0:
         if video_id_result:
             return video_id_result
-        log(f'  Publicado mas sem video ID no output')
+        log(f'  Published but no video ID in output')
         return 'unknown'
     else:
-        last_output = '\n'.join(output_lines[-5:]) if output_lines else 'sem output'
-        log(f'  Erro na publicacao: {last_output}')
+        last_output = '\n'.join(output_lines[-5:]) if output_lines else 'no output'
+        log(f'  Publication error: {last_output}')
         return None
 
 
@@ -321,12 +321,12 @@ def _add_pending_thumb(video_id, title):
 
 
 def _apply_saved_preset(preset_name, config, yt_thumb):
-    """Aplica preset salvo (customizado) ou hardcoded."""
+    """Applies a saved (custom) or hardcoded preset."""
     saved = config.get(f'preset_{preset_name}', '')
     if saved:
         try:
             preset_data = json.loads(saved)
-            # Mapear campos JS para env vars
+            # Map JS fields to env vars
             field_map = {
                 'font': 'DESIGN_FONT', 'fontSize': 'DESIGN_FONT_SIZE', 'lastLineScale': 'DESIGN_LAST_LINE_SCALE',
                 'lineHeight': 'DESIGN_LINE_HEIGHT', 'tracking': 'DESIGN_TRACKING', 'case': 'DESIGN_CASE',
@@ -346,11 +346,11 @@ def _apply_saved_preset(preset_name, config, yt_thumb):
             for js_key, env_key in field_map.items():
                 if js_key in preset_data:
                     os.environ[env_key] = str(preset_data[js_key])
-            log(f'  Preset customizado: {preset_name}')
+            log(f'  Custom preset: {preset_name}')
             return
         except Exception:
             pass
-    # Fallback para preset hardcoded
+    # Fallback to hardcoded preset
     if preset_name in yt_thumb.PRESETS:
         for k, v in yt_thumb.PRESETS[preset_name].items():
             os.environ[k] = v
@@ -391,14 +391,14 @@ def handle_thumbnail(video_id, title, description, config):
             google_img_model = config.get('google_image_model', '')
             if google_img_model:
                 os.environ['GOOGLE_IMAGE_MODEL'] = google_img_model
-            # API keys dos providers
+            # API keys for providers
             or_key = config.get('openrouter_api_key', '')
             if or_key:
                 os.environ['OPENROUTER_API_KEY'] = or_key
             ant_key = config.get('anthropic_api_key', '')
             if ant_key:
                 os.environ['ANTHROPIC_API_KEY'] = ant_key
-            # LLM chain (3 tentativas)
+            # LLM chain (3 attempts)
             for i in range(1, 4):
                 p = config.get(f'thumb_llm_{i}_provider', '')
                 m = config.get(f'thumb_llm_{i}_model', '')
@@ -428,7 +428,7 @@ def handle_thumbnail(video_id, title, description, config):
                 if val:
                     os.environ[key.upper()] = val
 
-            # Random preset: se tem presets selecionados, sorteia um
+            # Random preset: if presets are selected, pick one randomly
             import random
             random_presets_str = config.get('design_random_presets', '')
             if random_presets_str:
@@ -436,11 +436,11 @@ def handle_thumbnail(video_id, title, description, config):
                 if random_list:
                     chosen = random.choice(random_list)
                     os.environ['DESIGN_RANDOM_PRESET'] = chosen
-                    # Carregar preset customizado se existir
+                    # Load custom preset if it exists
                     saved = config.get(f'preset_{chosen}', '')
                     if saved:
                         os.environ['DESIGN_SAVED_PRESET'] = saved
-                    log(f'  Random preset: {chosen} (de {len(random_list)} opcoes)')
+                    log(f'  Random preset: {chosen} (from {len(random_list)} options)')
 
             # Import generate_thumbnail from scripts/yt-thumbnail
             import types
@@ -652,14 +652,14 @@ def enrich_live_with_ai(video_id, data_live, duracao_min, transcript_text, confi
 
     user_msg = (
         f'Video ID: {video_id}\n'
-        f'Data da live: {data_live}\n'
-        f'Duracao: {duracao_min} minutos\n\n'
-        f'=== TRANSCRICAO DA LIVE ===\n{transcript_text}'
+        f'Live date: {data_live}\n'
+        f'Duration: {duracao_min} minutes\n\n'
+        f'=== LIVE TRANSCRIPT ===\n{transcript_text}'
     )
     full_prompt = f'{system_prompt}\n\n---\n\n{user_msg}'
 
     try:
-        log(f'  Gerando titulo/descricao com IA para {video_id}...')
+        log(f'  Generating title/description with AI for {video_id}...')
         env = os.environ.copy()
         env.pop('CLAUDECODE', None)
         result = subprocess.run(
@@ -667,7 +667,7 @@ def enrich_live_with_ai(video_id, data_live, duracao_min, transcript_text, confi
             capture_output=True, text=True, timeout=180, env=env
         )
         if result.returncode != 0:
-            log(f'  Claude CLI erro (code {result.returncode}): {result.stderr[:200]}')
+            log(f'  Claude CLI error (code {result.returncode}): {result.stderr[:200]}')
             return None, None
 
         data = json.loads(result.stdout)
@@ -680,12 +680,12 @@ def enrich_live_with_ai(video_id, data_live, duracao_min, transcript_text, confi
             new_title = refined.get('title', '')
             new_desc = refined.get('description', '')
             if new_title:
-                log(f'  Titulo gerado: {new_title[:60]}')
+                log(f'  Generated title: {new_title[:60]}')
                 return new_title, new_desc
-        log(f'  IA nao retornou JSON valido')
+        log(f'  AI did not return valid JSON')
         return None, None
     except Exception as e:
-        log(f'  Erro ao gerar com IA: {e}')
+        log(f'  Error generating with AI: {e}')
         return None, None
 
 
@@ -698,32 +698,32 @@ def _enrich_single_live(vid, live, config):
     # Read transcript
     condensed_file = os.path.join(LIVES_DIR, vid, 'condensed.txt')
     if not os.path.exists(condensed_file):
-        log(f'  Enrich: transcricao nao encontrada para {vid}')
+        log(f'  Enrich: transcript not found for {vid}')
         return False
 
     with open(condensed_file) as f:
         transcript = f.read()
     if not transcript:
-        log(f'  Enrich: transcricao vazia para {vid}')
+        log(f'  Enrich: empty transcript for {vid}')
         return False
 
     # Generate title + description with AI
-    update_status('enriquecendo', f'Gerando titulo/descricao: {vid}', vid, step='analise')
+    update_status('enriching', f'Generating title/description: {vid}', vid, step='analysis')
     new_title, new_desc = enrich_live_with_ai(vid, data_live, duracao, transcript, config)
     if not new_title:
-        log(f'  Enrich: IA nao gerou titulo para {vid}')
+        log(f'  Enrich: AI did not generate title for {vid}')
         return False
 
     # Update on YouTube (title + description)
     try:
         update_video_metadata(vid, new_title, new_desc or '')
     except Exception as yt_err:
-        log(f'  Enrich: erro ao atualizar YouTube para {vid}: {yt_err}')
+        log(f'  Enrich: error updating YouTube for {vid}: {yt_err}')
         # Still update local DB even if YouTube fails (e.g. wrong channel)
 
     # Generate and upload thumbnail
     try:
-        update_status('enriquecendo', f'Thumbnail: {vid}', vid, step='thumbnail')
+        update_status('enriching', f'Thumbnail: {vid}', vid, step='thumbnail')
         thumb_path = generate_enrich_thumbnail(new_title, config)
         if thumb_path and os.path.exists(thumb_path):
             thumbs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lives', 'thumbs')
@@ -762,11 +762,11 @@ def process_enrich(config):
     ]
 
     if not genericas:
-        log('  Nenhuma live para enriquecer')
+        log('  No lives to enrich')
         return {'enriched': 0, 'errors': 0}
 
-    log(f'  {len(genericas)} lives para enriquecer, processando ate {max_por_vez}')
-    update_status('enriquecendo', f'Enriquecendo {min(len(genericas), max_por_vez)} lives...')
+    log(f'  {len(genericas)} lives to enrich, processing up to {max_por_vez}')
+    update_status('enriching', f'Enriching {min(len(genericas), max_por_vez)} lives...')
 
     enriched = 0
     errors = 0
@@ -778,8 +778,8 @@ def process_enrich(config):
             # If no transcript yet, run full cut process first
             condensed_file = os.path.join(LIVES_DIR, vid, 'condensed.txt')
             if not os.path.exists(condensed_file):
-                log(f'  Sem transcricao para {vid}, rodando corte primeiro...')
-                update_status('enriquecendo', f'Cortando: {vid}', vid, step='corte')
+                log(f'  No transcript for {vid}, running cut first...')
+                update_status('enriching', f'Cutting: {vid}', vid, step='cut')
                 success = run_corte(vid, config)
                 if success:
                     job_dir = os.path.join(LIVES_DIR, vid)
@@ -798,7 +798,7 @@ def process_enrich(config):
                     })
                 else:
                     update_live_status(vid, 'status_cortes', 'erro')
-                    log(f'  Corte falhou para {vid}, pulando enrich')
+                    log(f'  Cut failed for {vid}, skipping enrich')
                     errors += 1
                     continue
 
@@ -809,15 +809,15 @@ def process_enrich(config):
                 errors += 1
 
         except Exception as e:
-            log(f'  Erro ao enriquecer {vid}: {e}')
+            log(f'  Error enriching {vid}: {e}')
             errors += 1
 
-    update_status('idle', f'Enrich concluido: {enriched} OK, {errors} erros')
+    update_status('idle', f'Enrich completed: {enriched} OK, {errors} errors')
     return {'enriched': enriched, 'errors': errors}
 
 
 def update_live_status(video_id, status_field, new_status, extra=None):
-    """Atualiza status de uma live no banco local."""
+    """Updates the status of a live in the local database."""
     fields = {status_field: new_status}
     if extra:
         fields.update(extra)
@@ -839,16 +839,16 @@ def _check_disk_space(config):
 
 
 def process_cortes(config):
-    """Processa cortes de lives pendentes."""
+    """Processes cuts for pending lives."""
     max_per_run = int(config.get('corte_max_por_dia', '3'))
     lives = get_pending_lives()
 
     pendentes = [l for l in lives if l.get('status_cortes') not in ('concluido', 'erro')]
     if not pendentes:
-        log('  Nenhuma live pendente para cortar')
+        log('  No pending lives to cut')
         return
 
-    log(f'  {len(pendentes)} lives pendentes, processando ate {max_per_run}')
+    log(f'  {len(pendentes)} pending lives, processing up to {max_per_run}')
 
     for live in pendentes[:max_per_run]:
         vid = live.get('video_id', '')
@@ -883,7 +883,7 @@ def process_cortes(config):
                 and live.get('observacoes', '') != 'enriquecida'
             )
             if enrich_auto and not enrich_paused and needs_enrich:
-                log(f'  Enrich auto: enriquecendo {vid} apos corte...')
+                log(f'  Auto enrich: enriching {vid} after cut...')
                 _enrich_single_live(vid, live, config)
         else:
             update_live_status(vid, 'status_cortes', 'erro')
@@ -894,9 +894,9 @@ _pub_lock = threading.Lock()
 _import_pub_lock = threading.Lock()
 
 def process_publicacao(config):
-    """Publica clips de lives (exclui imports)."""
+    """Publishes clips from lives (excludes imports)."""
     if not _pub_lock.acquire(blocking=False):
-        log('  Publicacao ja em andamento, pulando')
+        log('  Publication already in progress, skipping')
         return
     try:
         _process_publicacao_inner(config)
@@ -906,9 +906,9 @@ def process_publicacao(config):
 _tiktok_pub_lock = threading.Lock()
 
 def process_publicacao_imports(config):
-    """Publica clips de imports normais (nao TikTok)."""
+    """Publishes clips from normal imports (not TikTok)."""
     if not _import_pub_lock.acquire(blocking=False):
-        log('  Publicacao de imports ja em andamento, pulando')
+        log('  Import publication already in progress, skipping')
         return
     try:
         privacy = config.get('import_privacy', '') or config.get('privacy_padrao', 'unlisted')
@@ -920,9 +920,9 @@ def process_publicacao_imports(config):
         _import_pub_lock.release()
 
 def process_publicacao_tiktok(config):
-    """Publica clips de TikTok."""
+    """Publishes TikTok clips."""
     if not _tiktok_pub_lock.acquire(blocking=False):
-        log('  Publicacao de TikTok ja em andamento, pulando')
+        log('  TikTok publication already in progress, skipping')
         return
     try:
         privacy = config.get('tiktok_privacy', '') or config.get('privacy_padrao', 'unlisted')
@@ -955,7 +955,7 @@ def _publish_import_list(label, lives, max_por_vez, privacy, config):
             publish_at = pa_match.group(1)
             now_hm = datetime.now().strftime('%H:%M')
             if now_hm < publish_at:
-                log(f'  [{label}] {vid}: aguardando publish_at={publish_at} (agora={now_hm}), pulando')
+                log(f'  [{label}] {vid}: waiting for publish_at={publish_at} (now={now_hm}), skipping')
                 continue
 
         found_any = True
@@ -964,7 +964,7 @@ def _publish_import_list(label, lives, max_por_vez, privacy, config):
         job_dir = os.path.join(LIVES_DIR, vid)
         manifest_file = os.path.join(job_dir, 'clips_manifest.json')
         if not os.path.exists(manifest_file):
-            log(f'  Sem manifest para {vid}, pulando')
+            log(f'  No manifest for {vid}, skipping')
             continue
 
         with open(manifest_file) as f:
@@ -995,7 +995,7 @@ def _publish_import_list(label, lives, max_por_vez, privacy, config):
             if clip.get('paused', False):
                 continue
             if not os.path.exists(clip['file']):
-                log(f'  Arquivo nao encontrado: {clip["file"]}')
+                log(f'  File not found: {clip["file"]}')
                 continue
 
             clip_title = clip['title']
@@ -1017,13 +1017,13 @@ def _publish_import_list(label, lives, max_por_vez, privacy, config):
                 'filename': clip_id
             })
 
-            update_status('publicando', f'[{label}] Enviando: {clip_title[:50]}', vid, step='upload', clip_title=clip_title[:50])
+            update_status('publishing', f'[{label}] Uploading: {clip_title[:50]}', vid, step='upload', clip_title=clip_title[:50])
             new_vid = run_publicacao(vid, clip['file'], clip_title, clip_desc,
                                      ','.join(clip.get('tags', [])) if isinstance(clip.get('tags'), list) else clip.get('tags', ''),
                                      clip_privacy)
 
             if new_vid:
-                update_status('publicando', f'[{label}] Thumbnail...', vid, step='thumbnail', clip_id=new_vid)
+                update_status('publishing', f'[{label}] Thumbnail...', vid, step='thumbnail', clip_id=new_vid)
                 handle_thumbnail(new_vid, clip_title, clip_desc, config)
                 db.update_publicado(lock_row_id,
                     clip_video_id=new_vid,
@@ -1034,28 +1034,28 @@ def _publish_import_list(label, lives, max_por_vez, privacy, config):
                 global_count += 1
                 pub_ok += 1
                 published_ids.add(clip_id)
-                log(f'  [{label}] Publicado: {clip_title[:50]} -> {new_vid}')
+                log(f'  [{label}] Published: {clip_title[:50]} -> {new_vid}')
             else:
                 db.update_publicado(lock_row_id, clip_video_id='erro_upload')
                 count += 1
                 global_count += 1
                 pub_erro += 1
                 published_ids.add(clip_id)
-                log(f'  [{label}] Falha: {clip_title[:50]}')
+                log(f'  [{label}] Failed: {clip_title[:50]}')
 
         if pub_ok != publicados_count:
             pend = max(0, qtd_clips - pub_ok)
             update_live_status(vid, 'clips_publicados', str(pub_ok), {'clips_pendentes': str(pend)})
 
     if not found_any:
-        log(f'  [{label}] Nenhum pendente para publicar')
+        log(f'  [{label}] No pending clips to publish')
 
 def _process_publicacao_inner(config):
     privacy = config.get('privacy_padrao', 'unlisted')
     max_por_vez = int(config.get('pub_max_por_vez', '2') or '2')
-    log(f'  Buscando lives para publicar (privacy={privacy}, max={max_por_vez})...')
+    log(f'  Looking for lives to publish (privacy={privacy}, max={max_por_vez})...')
     lives = get_pending_lives()
-    log(f'  {len(lives)} lives encontradas')
+    log(f'  {len(lives)} lives found')
 
     # Find lives with clips but not all published
     found_any = False
@@ -1070,18 +1070,18 @@ def _process_publicacao_inner(config):
         if publicados_count >= qtd_clips or qtd_clips == 0:
             continue
 
-        # Imports tem fila propria — excluir daqui
+        # Imports have their own queue — exclude here
         if vid.startswith('import_'):
             continue
 
         found_any = True
-        log(f'  Live {vid}: {qtd_clips} clips, {publicados_count} publicados')
+        log(f'  Live {vid}: {qtd_clips} clips, {publicados_count} published')
 
         job_dir = os.path.join(LIVES_DIR, vid)
         manifest_file = os.path.join(job_dir, 'clips_manifest.json')
 
         if not os.path.exists(manifest_file):
-            log(f'  Sem manifest para {vid}, pulando')
+            log(f'  No manifest for {vid}, skipping')
             continue
 
         with open(manifest_file) as f:
@@ -1103,10 +1103,10 @@ def _process_publicacao_inner(config):
                 published_ids.add(cid)
 
         count = 0
-        log(f'  {len(clips)} clips no manifest, {pub_ok} publicados OK, {pub_erro} com erro')
+        log(f'  {len(clips)} clips in manifest, {pub_ok} published OK, {pub_erro} with error')
         for clip in clips:
             if count >= max_por_vez:
-                log(f'  Limite de {max_por_vez} clips por vez atingido')
+                log(f'  Limit of {max_por_vez} clips per run reached')
                 break
 
             # Unique clip_id: live_video_id + index
@@ -1121,13 +1121,13 @@ def _process_publicacao_inner(config):
                 continue
 
             if not os.path.exists(clip['file']):
-                log(f'  Arquivo nao encontrado: {clip["file"]}')
+                log(f'  File not found: {clip["file"]}')
                 continue
 
             clip_title = clip['title']
             clip_desc = clip.get('description', '') or clip.get('title', '')
 
-            # Lock no banco: marcar como "publicando" ANTES de iniciar
+            # DB lock: mark as "publicando" BEFORE starting
             now = datetime.now().strftime('%Y-%m-%d %H:%M')
             lock_row_id = db.add_publicado({
                 'clip_video_id': 'publicando',
@@ -1142,17 +1142,17 @@ def _process_publicacao_inner(config):
                 'categoria': '27',
                 'filename': clip_id
             })
-            log(f'  Reservado no banco: {clip_title[:50]} (id: {clip_id})')
+            log(f'  Reserved in DB: {clip_title[:50]} (id: {clip_id})')
 
-            # Refinar titulo e descricao com IA
-            update_status('publicando', f'Refinando com IA: {clip_title[:50]}', vid, step='refine', clip_title=clip_title[:50])
+            # Refine title and description with AI
+            update_status('publishing', f'Refining with AI: {clip_title[:50]}', vid, step='refine', clip_title=clip_title[:50])
             clip_title, clip_desc = refine_pub_with_ai(clip_title, clip_desc, config, video_id=vid)
 
-            # Append link da live original (se ativado na config)
+            # Append original live link (if enabled in config)
             if config.get('pub_link_live', 'true') == 'true':
                 clip_desc += f'\n\nLive original: https://www.youtube.com/watch?v={vid}'
 
-            update_status('publicando', f'Enviando: {clip_title[:50]}', vid, step='upload', clip_title=clip_title[:50])
+            update_status('publishing', f'Uploading: {clip_title[:50]}', vid, step='upload', clip_title=clip_title[:50])
             new_vid = run_publicacao(
                 vid, clip['file'], clip_title,
                 clip_desc, ','.join(clip.get('tags', [])),
@@ -1160,7 +1160,7 @@ def _process_publicacao_inner(config):
             )
 
             if new_vid:
-                update_status('publicando', f'Gerando thumbnail...', vid, step='thumbnail', clip_id=new_vid, clip_title=clip_title[:50])
+                update_status('publishing', f'Generating thumbnail...', vid, step='thumbnail', clip_id=new_vid, clip_title=clip_title[:50])
                 handle_thumbnail(
                     new_vid, clip_title,
                     clip.get('description', ''), config
@@ -1175,59 +1175,59 @@ def _process_publicacao_inner(config):
                 count += 1
                 pub_ok += 1
                 published_ids.add(clip_id)
-                log(f'  Publicado: {clip_title[:50]} -> {new_vid}')
+                log(f'  Published: {clip_title[:50]} -> {new_vid}')
             else:
                 db.update_publicado(lock_row_id, clip_video_id='erro_upload')
                 count += 1
                 pub_erro += 1
                 published_ids.add(clip_id)
-                log(f'  Falha ao publicar: {clip_title[:50]}')
+                log(f'  Failed to publish: {clip_title[:50]}')
 
         # Update counter
         new_total = pub_ok
         if new_total != publicados_count:
             pend = max(0, qtd_clips - new_total)
             update_live_status(vid, 'clips_publicados', str(new_total), {'clips_pendentes': str(pend)})
-            log(f'  Atualizado clips_publicados: {publicados_count} -> {new_total} para {vid}')
+            log(f'  Updated clips_publicados: {publicados_count} -> {new_total} for {vid}')
 
         if count > 0:
-            log(f'  {count} tentativa(s) para {vid}')
-            update_status('idle', f'Publicacao concluida para {vid}')
+            log(f'  {count} attempt(s) for {vid}')
+            update_status('idle', f'Publication completed for {vid}')
             break
 
     if not found_any:
-        log('  Nenhum clip pendente para publicar')
-        update_status('idle', 'Nenhum clip para publicar')
+        log('  No pending clips to publish')
+        update_status('idle', 'No clips to publish')
 
 
 def main():
-    log('Scheduler iniciado')
+    log('Scheduler started')
     log(f'  Scripts: {SCRIPTS_DIR}')
     log(f'  Lives: {LIVES_DIR}')
     log(f'  Config: {CONFIG_DIR}')
-    update_status('idle', 'Scheduler iniciado')
+    update_status('idle', 'Scheduler started')
 
     config = None
     corte_running = threading.Event()
     try:
         config = load_config()
     except Exception as e:
-        log(f'ERRO ao carregar config: {e}')
+        log(f'ERROR loading config: {e}')
 
-    # Rastreia qual horario agendado ja foi executado (evita repetir)
+    # Track which scheduled time has already been executed (avoids repeating)
     startup_corte = get_matching_schedule(config.get('corte_horarios', '')) if config else None
     startup_pub = get_matching_schedule(config.get('pub_horarios', '')) if config else None
     startup_import_pub = get_matching_schedule(config.get('import_pub_horarios', '')) if config else None
     last_executed = {'cortes': startup_corte, 'pub': startup_pub, 'import_pub': startup_import_pub}
-    log(f'  Agendamento: cortes={startup_corte or "nenhum agora"}, pub={startup_pub or "nenhum agora"}, import_pub={startup_import_pub or "nenhum agora"}')
+    log(f'  Schedule: cuts={startup_corte or "none now"}, pub={startup_pub or "none now"}, import_pub={startup_import_pub or "none now"}')
 
     def run_cortes_thread(cfg):
-        """Roda cortes em thread separada para nao bloquear publicacao."""
+        """Runs cuts in a separate thread so it does not block publication."""
         try:
             corte_running.set()
             process_cortes(cfg)
         except Exception as e:
-            log(f'ERRO no corte (thread): {e}')
+            log(f'ERROR in cut (thread): {e}')
         finally:
             corte_running.clear()
 
@@ -1235,7 +1235,7 @@ def main():
         try:
             config = load_config()
 
-            # --- Cortes (roda em thread separada) ---
+            # --- Cuts (runs in a separate thread) ---
             cortes_paused = config.get('pipeline_cortes_paused', 'false') == 'true'
             corte_auto = config.get('corte_auto', 'true') == 'true'
             corte_horarios = config.get('corte_horarios', '')
@@ -1246,18 +1246,18 @@ def main():
                     if not corte_running.is_set():
                         disk_ok, disk_free = _check_disk_space(config)
                         if not disk_ok:
-                            log(f'  Corte agendado ({corte_match}) bloqueado: disco cheio ({disk_free} GB livre)')
+                            log(f'  Scheduled cut ({corte_match}) blocked: disk full ({disk_free} GB free)')
                         else:
                             last_executed['cortes'] = corte_match
-                            log(f'==> Hora de cortar! (agendado: {corte_match})')
+                            log(f'==> Time to cut! (scheduled: {corte_match})')
                             threading.Thread(target=run_cortes_thread, args=(config,), daemon=True).start()
                     else:
-                        log(f'==> Corte agendado ({corte_match}) mas outro corte ainda esta rodando, pulando')
+                        log(f'==> Scheduled cut ({corte_match}) but another cut is still running, skipping')
 
             if not corte_match and last_executed['cortes']:
                 last_executed['cortes'] = None
 
-            # --- Publicacao (roda no loop principal, nao bloqueia) ---
+            # --- Publication (runs in main loop, non-blocking) ---
             pub_paused = config.get('pipeline_pub_paused', 'false') == 'true'
             pub_horarios = config.get('pub_horarios', '')
             pub_match = get_matching_schedule(pub_horarios)
@@ -1265,13 +1265,13 @@ def main():
             if not pub_paused and pub_match:
                 if last_executed['pub'] != pub_match:
                     last_executed['pub'] = pub_match
-                    log(f'==> Hora de publicar! (agendado: {pub_match})')
+                    log(f'==> Time to publish! (scheduled: {pub_match})')
                     process_publicacao(config)
 
             if not pub_match and last_executed['pub']:
                 last_executed['pub'] = None
 
-            # --- Publicacao de imports (fila propria via import_pub_horarios) ---
+            # --- Import publication (own queue via import_pub_horarios) ---
             import_pub_horarios = config.get('import_pub_horarios', '')
             import_pub_paused = config.get('pipeline_imports_paused', 'false') == 'true'
             import_pub_match = get_matching_schedule(import_pub_horarios) if import_pub_horarios else None
@@ -1279,13 +1279,13 @@ def main():
             if not import_pub_paused and import_pub_match:
                 if last_executed['import_pub'] != import_pub_match:
                     last_executed['import_pub'] = import_pub_match
-                    log(f'==> Hora de publicar imports! (agendado: {import_pub_match})')
+                    log(f'==> Time to publish imports! (scheduled: {import_pub_match})')
                     process_publicacao_imports(config)
 
             if not import_pub_match and last_executed.get('import_pub'):
                 last_executed['import_pub'] = None
 
-            # --- Publicacao de TikTok (fila propria via tiktok_pub_horarios) ---
+            # --- TikTok publication (own queue via tiktok_pub_horarios) ---
             tiktok_pub_horarios = config.get('tiktok_pub_horarios', '')
             tiktok_pub_paused = config.get('pipeline_tiktok_paused', 'false') == 'true'
             tiktok_pub_match = get_matching_schedule(tiktok_pub_horarios) if tiktok_pub_horarios else None
@@ -1293,13 +1293,13 @@ def main():
             if not tiktok_pub_paused and tiktok_pub_match:
                 if last_executed.get('tiktok_pub') != tiktok_pub_match:
                     last_executed['tiktok_pub'] = tiktok_pub_match
-                    log(f'==> Hora de publicar TikTok! (agendado: {tiktok_pub_match})')
+                    log(f'==> Time to publish TikTok! (scheduled: {tiktok_pub_match})')
                     process_publicacao_tiktok(config)
 
             if not tiktok_pub_match and last_executed.get('tiktok_pub'):
                 last_executed['tiktok_pub'] = None
 
-            # --- Enrich lives (titulo generico INEMA → titulo + desc + thumb) ---
+            # --- Enrich lives (generic title INEMA → title + desc + thumb) ---
             enrich_paused = config.get('pipeline_enrich_paused', 'false') == 'true'
             enrich_auto = config.get('enrich_auto', 'false') == 'true'
             enrich_horarios = config.get('enrich_horarios', '')
@@ -1308,7 +1308,7 @@ def main():
             if not enrich_paused and enrich_auto and enrich_match:
                 if last_executed.get('enrich') != enrich_match:
                     last_executed['enrich'] = enrich_match
-                    log(f'==> Hora de enriquecer lives! (agendado: {enrich_match})')
+                    log(f'==> Time to enrich lives! (scheduled: {enrich_match})')
                     process_enrich(config)
 
             if not enrich_match and last_executed.get('enrich'):
@@ -1323,20 +1323,20 @@ def main():
             if not tiktok_paused and tiktok_auto and tiktok_match:
                 if last_executed.get('tiktok') != tiktok_match:
                     last_executed['tiktok'] = tiktok_match
-                    log(f'==> TikTok download da fila! (agendado: {tiktok_match})')
+                    log(f'==> TikTok download from queue! (scheduled: {tiktok_match})')
                     try:
                         import tiktok_scanner
                         results = tiktok_scanner.download_pending_videos(config)
                         total = sum(r.get('downloaded', 0) for r in results)
                         if total:
-                            log(f'==> TikTok: {total} video(s) baixado(s)')
+                            log(f'==> TikTok: {total} video(s) downloaded')
                     except Exception as e:
-                        log(f'ERRO no tiktok_scanner: {e}')
+                        log(f'ERROR in tiktok_scanner: {e}')
 
             if not tiktok_match and last_executed.get('tiktok'):
                 last_executed['tiktok'] = None
 
-            # --- Import worker (verifica a cada hora ou se import_auto=true) ---
+            # --- Import worker (checks every hour or if import_auto=true) ---
             now_hm = datetime.now().strftime('%H:%M')
             import_auto = config.get('import_auto', 'false') == 'true'
             if import_auto:
@@ -1348,17 +1348,17 @@ def main():
                         results = import_worker.process_imports(config)
                         novos = [r for r in results if r.get('ok')]
                         if novos:
-                            log(f'==> Import: {len(novos)} lote(s) importado(s) para publicacao')
+                            log(f'==> Import: {len(novos)} batch(es) imported for publication')
                     except Exception as e:
-                        log(f'ERRO no import_worker: {e}')
+                        log(f'ERROR in import_worker: {e}')
 
-            # --- Auto-sync (meia-noite) ---
+            # --- Auto-sync (midnight) ---
             sync_auto = config.get('sync_auto', 'false') == 'true'
             if sync_auto and now_hm == '00:00':
                 if last_executed.get('sync') != '00:00':
                     last_executed['sync'] = '00:00'
-                    log('==> Auto-sync: sincronizando lives do canal de origem...')
-                    update_status('sincronizando', 'Auto-sync em andamento...')
+                    log('==> Auto-sync: syncing lives from source channel...')
+                    update_status('syncing', 'Auto-sync in progress...')
                     # Derive dashboard port from INSTANCE_NAME (yt-pub-livesN -> 8090+N)
                     instance_name = os.environ.get('INSTANCE_NAME', '')
                     _inst_num = ''.join(c for c in instance_name if c.isdigit())
@@ -1380,55 +1380,55 @@ def main():
                             resp = urllib.request.urlopen(req, timeout=120)
                             result = json.loads(resp.read())
                             novas = result.get('novas_lives', 0)
-                            log(f'  Auto-sync concluido: {novas} novas lives')
-                            update_status('idle', f'Auto-sync OK: {novas} novas lives')
+                            log(f'  Auto-sync completed: {novas} new lives')
+                            update_status('idle', f'Auto-sync OK: {novas} new lives')
                             sync_ok = True
                             break
                         except Exception as e:
-                            log(f'  ERRO no auto-sync (tentativa {attempt}/3): {e}')
+                            log(f'  ERROR in auto-sync (attempt {attempt}/3): {e}')
                             if attempt < 3:
                                 time.sleep(30)
                     if not sync_ok:
-                        log('  Auto-sync falhou apos 3 tentativas')
-                        update_status('erro', 'Auto-sync falhou apos 3 tentativas (connection refused)')
+                        log('  Auto-sync failed after 3 attempts')
+                        update_status('error', 'Auto-sync failed after 3 attempts (connection refused)')
             if now_hm != '00:00' and last_executed.get('sync'):
                 last_executed['sync'] = None
 
         except Exception as e:
-            log(f'ERRO: {e}')
+            log(f'ERROR: {e}')
 
         # Check every 60 seconds
         time.sleep(60)
 
 
 def acquire_lock():
-    """Garante que apenas 1 instancia do scheduler rode por projeto.
+    """Ensures only 1 scheduler instance runs per project.
 
-    Abertura em 'r+' (nao trunca) para nao apagar o PID antes de validar a flock.
-    So trunca+escreve o PID DEPOIS de adquirir a flock. Remove o fluxo de "stale
-    detectado" anterior, que tinha race condition causando multiplas instancias.
+    Opens with 'r+' (no truncate) to avoid clearing the PID before validating the flock.
+    Only truncates and writes the PID AFTER acquiring the flock. Removes the previous
+    "stale detected" flow that had a race condition causing multiple instances.
     """
     import fcntl
     lock_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.scheduler.lock')
-    # Abre (ou cria) sem truncar
+    # Open (or create) without truncating
     fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o644)
     lock_file = os.fdopen(fd, 'r+')
     try:
         fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
-        # Outro processo detem a flock. Le PID (sem modificar arquivo) e reporta.
+        # Another process holds the flock. Read PID (without modifying file) and report.
         lock_file.seek(0)
         raw = lock_file.read().strip()
         try:
             old_pid = int(raw)
             os.kill(old_pid, 0)
-            print(f'[ERRO] Outro scheduler ja esta rodando (PID {old_pid}, lock: {lock_path}). Saindo.', file=sys.stderr)
+            print(f'[ERROR] Another scheduler is already running (PID {old_pid}, lock: {lock_path}). Exiting.', file=sys.stderr)
         except (ValueError, ProcessLookupError, OSError):
-            print(f'[ERRO] flock travada mas PID vazio/morto (lock inconsistente). '
-                  f'Remova manualmente {lock_path} e reinicie.', file=sys.stderr)
+            print(f'[ERROR] flock held but PID is empty/dead (inconsistent lock). '
+                  f'Remove {lock_path} manually and restart.', file=sys.stderr)
         lock_file.close()
         sys.exit(1)
-    # flock OK: agora pode truncar e escrever o PID
+    # flock OK: now safe to truncate and write the PID
     lock_file.seek(0)
     lock_file.truncate()
     lock_file.write(str(os.getpid()))
