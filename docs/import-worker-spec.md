@@ -1,44 +1,44 @@
-# Import Worker — Especificação de Integração
+# Import Worker — Integration Specification
 
-Qualquer sistema externo (n8n, Make, scripts, outras instâncias) pode entregar clips
-para publicação automática no YouTube simplesmente copiando arquivos para a pasta `imports/`.
+Any external system (n8n, Make, scripts, other instances) can deliver clips
+for automatic YouTube publication by simply copying files into the `imports/` folder.
 
 ---
 
-## Estrutura de pastas
+## Folder structure
 
 ```
 yt-pub-lives<N>/
   imports/
-    nome-do-lote/          ← uma pasta = um lote de publicação
-      clip_01_Titulo.mp4
-      clip_02_Outro.mp4
-      manifest.json        ← opcional, mas recomendado
+    batch-name/          ← one folder = one publication batch
+      clip_01_Title.mp4
+      clip_02_Other.mp4
+      manifest.json        ← optional, but recommended
 ```
 
-- O nome da pasta vira o **título do lote** no dashboard (pode ser sobrescrito no manifest).
-- Cada pasta é processada de forma independente.
-- Após processado, a pasta é **removida automaticamente** de `imports/`.
+- The folder name becomes the **batch title** in the dashboard (can be overridden in the manifest).
+- Each folder is processed independently.
+- After processing, the folder is **automatically removed** from `imports/`.
 
 ---
 
-## manifest.json — Formato completo
+## manifest.json — Full format
 
 ```json
 {
-  "titulo":     "Nome do lote no dashboard",
+  "titulo":     "Batch name in dashboard",
   "publish_at": "14:00",
   "privacy":    "public",
   "clips": [
     {
-      "filename":    "clip_01_Titulo.mp4",
-      "title":       "Título do vídeo no YouTube",
-      "description": "Descrição completa do vídeo.",
+      "filename":    "clip_01_Title.mp4",
+      "title":       "Video title on YouTube",
+      "description": "Full video description.",
       "tags":        ["tag1", "tag2", "tag3"]
     },
     {
-      "filename":    "clip_02_Outro.mp4",
-      "title":       "Segundo vídeo",
+      "filename":    "clip_02_Other.mp4",
+      "title":       "Second video",
       "description": "",
       "tags":        []
     }
@@ -46,77 +46,77 @@ yt-pub-lives<N>/
 }
 ```
 
-### Campos do manifest raiz
+### Root manifest fields
 
-| Campo        | Tipo   | Obrigatório | Descrição |
-|--------------|--------|-------------|-----------|
-| `titulo`     | string | não         | Nome do lote no dashboard. Default: nome da pasta |
-| `publish_at` | string | não         | Horário HH:MM para publicar (ex: `"14:00"`). Só respeitado se `import_fila_global=false` no config |
-| `privacy`    | string | não         | `public` \| `unlisted` \| `private`. Sobrescreve o config global deste lote |
-| `clips`      | array  | não         | Lista de metadados por arquivo. Se ausente, usa nomes dos arquivos |
+| Field        | Type   | Required | Description |
+|--------------|--------|----------|-------------|
+| `titulo`     | string | no       | Batch name in dashboard. Default: folder name |
+| `publish_at` | string | no       | Publish time HH:MM (e.g. `"14:00"`). Only respected if `import_fila_global=false` in config |
+| `privacy`    | string | no       | `public` \| `unlisted` \| `private`. Overrides the global config for this batch |
+| `clips`      | array  | no       | Per-file metadata list. If absent, uses filenames |
 
-### Campos por clip
+### Per-clip fields
 
-| Campo         | Tipo         | Obrigatório | Descrição |
-|---------------|--------------|-------------|-----------|
-| `filename`    | string       | sim         | Nome exato do arquivo MP4 na mesma pasta |
-| `title`       | string       | não         | Título no YouTube. Default: nome do arquivo sem extensão |
-| `description` | string       | não         | Descrição. Se vazio e `import_gerar_descricao=true`, IA gera automaticamente |
-| `tags`        | array string | não         | Tags do vídeo |
-
----
-
-## Sem manifest — comportamento padrão
-
-Se não houver `manifest.json`, o sistema:
-
-1. Usa todos os `.mp4` da pasta em ordem alfabética
-2. Título = nome do arquivo sem extensão e sem prefixo numérico
-   - `clip_01_Como usar n8n.mp4` → `"Como usar n8n"`
-   - `03_Tutorial basico.mp4` → `"Tutorial basico"`
-3. Descrição = vazia (ou gerada por IA se `import_gerar_descricao=true`)
-4. Tags = vazia
-5. Privacy = valor global do config
+| Field         | Type         | Required | Description |
+|---------------|--------------|----------|-------------|
+| `filename`    | string       | yes      | Exact name of the MP4 file in the same folder |
+| `title`       | string       | no       | Title on YouTube. Default: filename without extension |
+| `description` | string       | no       | Description. If empty and `import_gerar_descricao=true`, AI generates it automatically |
+| `tags`        | string array | no       | Video tags |
 
 ---
 
-## Config do sistema (painel de configuração)
+## Without manifest — default behavior
 
-| Chave                    | Valores         | Default   | Descrição |
-|--------------------------|-----------------|-----------|-----------|
-| `import_auto`            | `true`\|`false` | `false`   | Verificação horária automática da pasta imports/ |
-| `import_gerar_descricao` | `true`\|`false` | `false`   | Gerar descrição via IA quando ausente no manifest |
-| `import_fila_global`     | `true`\|`false` | `true`    | `true` = entra na fila normal (`pub_horarios`); `false` = respeita `publish_at` do manifest |
+If there is no `manifest.json`, the system:
+
+1. Uses all `.mp4` files in the folder in alphabetical order
+2. Title = filename without extension and without numeric prefix
+   - `clip_01_How to use n8n.mp4` → `"How to use n8n"`
+   - `03_Basic tutorial.mp4` → `"Basic tutorial"`
+3. Description = empty (or AI-generated if `import_gerar_descricao=true`)
+4. Tags = empty
+5. Privacy = global config value
 
 ---
 
-## Quando os clips são publicados
+## System config (configuration panel)
 
-### Modo fila global (`import_fila_global=true`)
+| Key                      | Values          | Default   | Description |
+|--------------------------|-----------------|-----------|-------------|
+| `import_auto`            | `true`\|`false` | `false`   | Automatic hourly scan of the imports/ folder |
+| `import_gerar_descricao` | `true`\|`false` | `false`   | Generate description via AI when absent in manifest |
+| `import_fila_global`     | `true`\|`false` | `true`    | `true` = enters the normal queue (`pub_horarios`); `false` = respects `publish_at` from manifest |
 
-Os clips importados entram na **mesma fila** que os clips cortados das lives.
-São publicados conforme o agendamento `pub_horarios` do config.
+---
+
+## When clips are published
+
+### Global queue mode (`import_fila_global=true`)
+
+Imported clips enter the **same queue** as clips cut from live streams.
+They are published according to the `pub_horarios` schedule in config.
 
 ```
-imports/lote/ → processado → fila global → pub_horarios → YouTube
+imports/batch/ → processed → global queue → pub_horarios → YouTube
 ```
 
-### Modo horário próprio (`import_fila_global=false`)
+### Own schedule mode (`import_fila_global=false`)
 
-O sistema respeita o `publish_at` definido no `manifest.json`.
-Se o horário atual for menor que `publish_at`, o lote aguarda.
+The system respects the `publish_at` defined in `manifest.json`.
+If the current time is earlier than `publish_at`, the batch waits.
 
 ```
 manifest.json: { "publish_at": "14:00" }
-→ clips não publicados antes das 14:00
-→ a partir das 14:00: entra na próxima rodada de publicação
+→ clips not published before 14:00
+→ from 14:00 onwards: enters the next publication round
 ```
 
-Se `publish_at` não estiver definido no manifest, o lote também entra na fila global.
+If `publish_at` is not set in the manifest, the batch also enters the global queue.
 
 ---
 
-## Trigger manual via API
+## Manual trigger via API
 
 ```http
 POST /api/import/scan
@@ -124,7 +124,7 @@ Content-Type: application/json
 {}
 ```
 
-Resposta:
+Response:
 ```json
 {
   "ok": true,
@@ -139,7 +139,7 @@ Resposta:
 
 ---
 
-## Limpeza via API
+## Cleanup via API
 
 ```http
 POST /api/import/clean
@@ -147,36 +147,36 @@ Content-Type: application/json
 { "action": "imports" }
 ```
 
-| `action`    | O que faz |
-|-------------|-----------|
-| `imports`   | Remove pastas residuais em `imports/` (não processadas) |
-| `clips`     | Remove a pasta `clips/` das lives **totalmente publicadas** |
-| `clips_all` | Remove a pasta `clips/` de **todas** as lives (cuidado!) |
+| `action`    | What it does |
+|-------------|--------------|
+| `imports`   | Removes leftover folders in `imports/` (unprocessed) |
+| `clips`     | Removes the `clips/` folder from **fully published** live streams |
+| `clips_all` | Removes the `clips/` folder from **all** live streams (use with caution) |
 
 ---
 
-## Exemplo de integração n8n/Make
+## n8n/Make integration example
 
-1. Gerar MP4 dos clips via pipeline de corte externo
-2. Criar `manifest.json` com títulos, descrições e `publish_at`
-3. Copiar tudo para `imports/nome-do-lote/` via SSH/SCP ou volume compartilhado
-4. Chamar `POST /api/import/scan` para processar imediatamente
-   (ou aguardar a verificação horária automática se `import_auto=true`)
+1. Generate clip MP4s via an external cutting pipeline
+2. Create `manifest.json` with titles, descriptions, and `publish_at`
+3. Copy everything to `imports/batch-name/` via SSH/SCP or shared volume
+4. Call `POST /api/import/scan` to process immediately
+   (or wait for the automatic hourly scan if `import_auto=true`)
 
 ---
 
-## CLI direto
+## Direct CLI
 
 ```bash
-# Processar imports/ manualmente
+# Process imports/ manually
 python3 import_worker.py scan
 
-# Limpar imports/ (residuos)
+# Clean imports/ (leftovers)
 python3 import_worker.py clean-imports
 
-# Limpar clips/ das lives totalmente publicadas
+# Clean clips/ from fully published live streams
 python3 import_worker.py clean-clips
 
-# Limpar clips/ de todas as lives
+# Clean clips/ from all live streams
 python3 import_worker.py clean-clips --all
 ```

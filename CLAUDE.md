@@ -1,23 +1,23 @@
-# Instrucoes para Claude Code — yt-pub-livesx
+# Claude Code Instructions — yt-pub-livesx
 
-## Regras de comportamento
+## Behavior Rules
 
-### Antes de fazer mudancas de codigo
-**Sempre mostrar o erro encontrado e a solucao proposta ANTES de aplicar qualquer mudanca.**
-Formato:
-- **Erro:** descricao clara do que esta errado e onde
-- **Solucao:** o que vai ser alterado e por que
-- Aguardar confirmacao do usuario antes de editar arquivos
+### Before making code changes
+**Always show the error found and the proposed solution BEFORE applying any change.**
+Format:
+- **Error:** clear description of what is wrong and where
+- **Solution:** what will be changed and why
+- Wait for user confirmation before editing files
 
-### Nunca sobrescrever .env
-Nunca usar Write para reescrever arquivos .env. Usar apenas Edit para alterar linhas especificas.
-Motivo: causou outage no lives4 anteriormente.
+### Never overwrite .env
+Never use Write to rewrite `.env` files. Use only Edit to change specific lines.
+Reason: caused an outage on lives4 previously.
 
-### Sincronizacao entre instancias
-- `yt-pub-livesx` e o template fonte de codigo
-- `scripts/sync-instances` sincroniza para as instancias listadas em TARGETS
-- NUNCA sincronizar config/, data/, credentials.enc, .env entre instancias
-- Apos sync, reiniciar os servicos afetados
+### Sync between instances
+- `yt-pub-livesx` is the source code template
+- `scripts/sync-instances` syncs to the instances listed in TARGETS
+- NEVER sync `config/`, `data/`, `credentials.enc`, `.env` between instances
+- After sync, restart the affected services
 
-### Versao
-Atualizar versao (vMAJOR.FEATURES.BUGS) no dashboard/index.html a cada mudanca funcional.
+### Version
+Update the version (vMAJOR.FEATURES.BUGS) in `dashboard/index.html` with every functional change.
