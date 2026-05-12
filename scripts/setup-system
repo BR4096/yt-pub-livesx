@@ -1,46 +1,46 @@
 #!/usr/bin/env bash
-# setup-system — Parte 1: prepara maquina + sobe master-dashboard (porta 8090)
+# setup-system — Part 1: prepares machine + starts master-dashboard (port 8090)
 #
-# Roda 1x por maquina. Detecta o template a partir do diretorio do proprio
-# script, entao funciona com qualquer nome de pasta (yt-pub-livesx, etc).
+# Run once per machine. Detects the template from the script's own directory,
+# so it works with any folder name (yt-pub-livesx, etc).
 set -euo pipefail
 
 TEMPLATE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 MASTER_PORT=8090
 MASTER_SERVICE="yt-master-dashboard"
 
-echo "==> yt-pub-lives — Setup do sistema"
+echo "==> yt-pub-lives — System setup"
 echo "    Template: $TEMPLATE_DIR"
 echo ""
 
-# 1. Pre-requisitos apt (silencioso se ja instalados)
-echo "==> Pre-requisitos apt..."
+# 1. apt prerequisites (silent if already installed)
+echo "==> apt prerequisites..."
 APT_PREREQS=(python3-pip unzip)
 NEED_APT=()
 for pkg in "${APT_PREREQS[@]}"; do
   dpkg -s "$pkg" &>/dev/null || NEED_APT+=("$pkg")
 done
 if [ ${#NEED_APT[@]} -gt 0 ]; then
-  echo "    Instalando: ${NEED_APT[*]}"
+  echo "    Installing: ${NEED_APT[*]}"
   sudo apt-get install -y "${NEED_APT[@]}" -qq
 else
   echo "    python3-pip + unzip: OK"
 fi
 
-# 2. Dependencias do sistema
-echo "==> Verificando dependencias..."
+# 2. System dependencies
+echo "==> Checking dependencies..."
 MISSING=()
 for tool in python3 ffmpeg curl yt-dlp deno; do
   if command -v "$tool" >/dev/null; then
     echo "    $tool: OK"
   else
-    echo "    $tool: FALTA"
+    echo "    $tool: MISSING"
     MISSING+=("$tool")
   fi
 done
 if [ ${#MISSING[@]} -gt 0 ]; then
   echo ""
-  echo "ERRO: instale antes:"
+  echo "ERROR: install the following first:"
   for t in "${MISSING[@]}"; do
     case "$t" in
       yt-dlp) echo "    sudo apt-get install -y pipx && pipx install yt-dlp" ;;
@@ -51,9 +51,9 @@ if [ ${#MISSING[@]} -gt 0 ]; then
   exit 1
 fi
 
-# 3. Pacotes Python
-echo "==> Pacotes Python..."
-# root + Ubuntu 22.04+: sem --user, com --break-system-packages (PEP 668)
+# 3. Python packages
+echo "==> Python packages..."
+# root + Ubuntu 22.04+: no --user, use --break-system-packages (PEP 668)
 pip3 install --quiet --break-system-packages -r "$TEMPLATE_DIR/requirements.txt"
 python3 -c "import cryptography, anthropic" \
   && echo "    cryptography + anthropic: OK"
@@ -63,25 +63,25 @@ BIN_DIR="$HOME/.local/bin"
 mkdir -p "$BIN_DIR"
 if ! echo "$PATH" | grep -q "$BIN_DIR"; then
   echo ""
-  echo "==> Adicione ao seu ~/.bashrc:"
+  echo "==> Add to your ~/.bashrc:"
   echo "    export PATH=\"\$HOME/.local/bin:\$PATH\""
 fi
 
-# 5. Master-dashboard — verifica conflitos antes de subir
+# 5. Master-dashboard — check for conflicts before starting
 echo ""
-echo "==> Master-dashboard (porta $MASTER_PORT)..."
+echo "==> Master-dashboard (port $MASTER_PORT)..."
 if systemctl --user is-active --quiet "$MASTER_SERVICE" 2>/dev/null; then
-  echo "ERRO: service '$MASTER_SERVICE' ja esta ativo."
-  echo "      Pare com: systemctl --user stop $MASTER_SERVICE"
+  echo "ERROR: service '$MASTER_SERVICE' is already active."
+  echo "       Stop it with: systemctl --user stop $MASTER_SERVICE"
   exit 1
 fi
 if ss -ltn 2>/dev/null | grep -q ":$MASTER_PORT "; then
-  echo "ERRO: porta $MASTER_PORT ja em uso por outro processo."
-  echo "      Verifique com: ss -ltnp | grep :$MASTER_PORT"
+  echo "ERROR: port $MASTER_PORT is already in use by another process."
+  echo "       Check with: ss -ltnp | grep :$MASTER_PORT"
   exit 1
 fi
 
-# 6. Gera service file com paths do TEMPLATE_DIR detectado
+# 6. Generate service file with detected TEMPLATE_DIR paths
 SVC="$HOME/.config/systemd/user/$MASTER_SERVICE.service"
 mkdir -p "$(dirname "$SVC")"
 cat > "$SVC" <<EOF
@@ -107,6 +107,6 @@ systemctl --user daemon-reload
 systemctl --user enable --now "$MASTER_SERVICE"
 
 echo ""
-echo "==> Master-dashboard rodando: http://localhost:$MASTER_PORT"
-echo "==> Proximo passo: criar primeiro canal:"
+echo "==> Master-dashboard running: http://localhost:$MASTER_PORT"
+echo "==> Next step: create first channel:"
 echo "    $TEMPLATE_DIR/scripts/setup-canal"

@@ -1,22 +1,22 @@
-Analise esta transcrição de uma live do YouTube e identifique os TÓPICOS PRINCIPAIS.
+Analyze this YouTube live transcript and identify the MAIN TOPICS.
 
-Para cada tópico, retorne:
-- start: timestamp de início (MM:SS)
-- end: timestamp de fim (MM:SS)
-- title: título curto e atrativo para YouTube (max 70 chars)
-- description: descrição de 2-3 frases para o YouTube
-- tags: lista de 3-5 tags relevantes
+For each topic, return:
+- start: start timestamp (MM:SS)
+- end: end timestamp (MM:SS)
+- title: short, attractive title for YouTube (max 70 chars)
+- description: 2-3 sentence description for YouTube
+- tags: list of 3-5 relevant tags
 
-Regras:
-- Cada clip deve ter entre 120 e 900 segundos
-- Ignore trechos de abertura/saudação e encerramento genérico
-- Foque em conteúdo educacional, dicas práticas e demonstrações
-- Títulos devem ser atrativos e usar palavras-chave de busca
-- Os clips NÃO devem se sobrepor
+Rules:
+- Each clip must be between 120 and 900 seconds
+- Ignore opening/greeting segments and generic closing segments
+- Focus on educational content, practical tips, and demonstrations
+- Titles must be attractive and use search keywords
+- Clips MUST NOT overlap
 
-Retorne APENAS um JSON válido com esta estrutura:
+Return ONLY a valid JSON with this structure:
 {
-  "video_title": "título original resumido",
+  "video_title": "summarized original title",
   "topics": [
     {
       "start": "MM:SS",
@@ -28,4 +28,4 @@ Retorne APENAS um JSON válido com esta estrutura:
   ]
 }
 
-TRANSCRIÇÃO:
+TRANSCRIPT:
