@@ -7,6 +7,7 @@ Le configuracao do banco SQLite local.
 
 import json
 import os
+import shutil
 import sys
 import time
 import subprocess
@@ -825,6 +826,20 @@ def update_live_status(video_id, status_field, new_status, extra=None):
     db.update_live(video_id, **fields)
 
 
+def _check_disk_space(config):
+    threshold_gb = float(config.get('disk_min_gb', '5'))
+    try:
+        check_path = LIVES_DIR if os.path.exists(LIVES_DIR) else PROJECT_ROOT
+        free_gb = round(shutil.disk_usage(check_path).free / (1024 ** 3), 1)
+        if free_gb < threshold_gb:
+            log(f'  DISK WARNING: {free_gb} GB free (minimum: {threshold_gb} GB)')
+            return False, free_gb
+        return True, free_gb
+    except Exception as e:
+        log(f'  Disk check error (non-fatal): {e}')
+        return True, -1.0
+
+
 def process_cortes(config):
     """Processa cortes de lives pendentes."""
     max_per_run = int(config.get('corte_max_por_dia', '3'))
@@ -1231,9 +1246,13 @@ def main():
             if not cortes_paused and corte_auto and corte_match:
                 if last_executed['cortes'] != corte_match:
                     if not corte_running.is_set():
-                        last_executed['cortes'] = corte_match
-                        log(f'==> Hora de cortar! (agendado: {corte_match})')
-                        threading.Thread(target=run_cortes_thread, args=(config,), daemon=True).start()
+                        disk_ok, disk_free = _check_disk_space(config)
+                        if not disk_ok:
+                            log(f'  Corte agendado ({corte_match}) bloqueado: disco cheio ({disk_free} GB livre)')
+                        else:
+                            last_executed['cortes'] = corte_match
+                            log(f'==> Hora de cortar! (agendado: {corte_match})')
+                            threading.Thread(target=run_cortes_thread, args=(config,), daemon=True).start()
                     else:
                         log(f'==> Corte agendado ({corte_match}) mas outro corte ainda esta rodando, pulando')
 
