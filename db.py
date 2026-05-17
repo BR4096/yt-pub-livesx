@@ -101,10 +101,10 @@ def get_db():
 
 
 def _migrate_tiktok_videos(db):
-    """Migra tiktok_downloaded legacy para tiktok_videos (1x).
+    """Migrates legacy tiktok_downloaded to tiktok_videos (one-time).
 
-    Convencao no legacy: downloaded_at == 'skip:<motivo>' => status='pulado';
-    caso contrario => status='baixado'. Roda apenas se tiktok_videos estiver vazia.
+    Legacy convention: downloaded_at == 'skip:<reason>' => status='pulado';
+    otherwise => status='baixado'. Runs only if tiktok_videos is empty.
     """
     row = db.execute('SELECT COUNT(*) AS n FROM tiktok_videos').fetchone()
     if row and row['n'] > 0:
@@ -374,19 +374,19 @@ def delete_tiktok_channel(channel_id):
     db.commit()
 
 
-# --------------- TIKTOK VIDEOS (fila de scan/download) ---------------
+# --------------- TIKTOK VIDEOS (scan/download queue) ---------------
 
 def is_tiktok_known(tiktok_id):
-    """Retorna True se o video ja existe na tabela (qualquer status)."""
+    """Returns True if the video already exists in the table (any status)."""
     db = get_db()
     row = db.execute('SELECT 1 FROM tiktok_videos WHERE tiktok_id=?', (tiktok_id,)).fetchone()
     return row is not None
 
 
 def is_tiktok_downloaded(tiktok_id):
-    """Compat: True se ja foi processado (baixado ou pulado).
+    """Compat: True if already processed (downloaded or skipped).
 
-    Mantida para o caminho legado; o scan novo usa is_tiktok_known.
+    Kept for legacy path; new scan uses is_tiktok_known.
     """
     db = get_db()
     row = db.execute(
@@ -397,7 +397,7 @@ def is_tiktok_downloaded(tiktok_id):
 
 
 def mark_tiktok_downloaded(tiktok_id, channel_handle=''):
-    """Compat: marca como baixado (usado por fluxos que ja nao passam pela fila)."""
+    """Compat: marks as downloaded (used by flows that no longer go through the queue)."""
     from datetime import datetime
     db = get_db()
     now = datetime.now().strftime('%Y-%m-%d %H:%M')
@@ -412,9 +412,9 @@ def mark_tiktok_downloaded(tiktok_id, channel_handle=''):
 
 def upsert_tiktok_video(tiktok_id, channel_handle, title='', url='', upload_date='', duration=0,
                         status='pendente', skip_reason=''):
-    """Insere ou atualiza um video na fila, sem sobrescrever status existente.
+    """Inserts or updates a video in the queue without overwriting an existing status.
 
-    Se ja existe com status final (baixado/pulado/erro), preserva. Caso novo: insere como pendente.
+    If it already exists with a final status (baixado/pulado/erro), preserves it. New entry: inserts as pendente.
     """
     from datetime import datetime
     db = get_db()
@@ -435,7 +435,7 @@ def upsert_tiktok_video(tiktok_id, channel_handle, title='', url='', upload_date
 
 
 def mark_tiktok_video_status(tiktok_id, status, skip_reason=''):
-    """Atualiza status de um video. Se virar 'baixado', grava downloaded_at."""
+    """Updates the status of a video. If it becomes 'baixado', records downloaded_at."""
     from datetime import datetime
     db = get_db()
     if status == 'baixado':
@@ -453,9 +453,9 @@ def mark_tiktok_video_status(tiktok_id, status, skip_reason=''):
 
 
 def get_pending_tiktok_videos(channel_handle, limit=3, order='oldest'):
-    """Retorna N videos pendentes de um canal, ordenados por upload_date.
+    """Returns N pending videos for a channel, sorted by upload_date.
 
-    order='oldest': mais antigos primeiro (ASC). 'newest': mais novos (DESC).
+    order='oldest': oldest first (ASC). 'newest': newest first (DESC).
     """
     db = get_db()
     direction = 'ASC' if order == 'oldest' else 'DESC'
@@ -468,7 +468,7 @@ def get_pending_tiktok_videos(channel_handle, limit=3, order='oldest'):
 
 
 def get_tiktok_channel_stats(channel_handle):
-    """Retorna contagem por status {pendente, baixado, pulado, erro} para um canal."""
+    """Returns count by status {pendente, baixado, pulado, erro} for a channel."""
     db = get_db()
     rows = db.execute(
         'SELECT status, COUNT(*) AS n FROM tiktok_videos WHERE channel_handle=? GROUP BY status',
@@ -481,7 +481,7 @@ def get_tiktok_channel_stats(channel_handle):
 
 
 def get_tiktok_max_upload_date(channel_handle):
-    """Retorna a maior upload_date (YYYYMMDD) ja registrada para o canal, ou '' se vazio."""
+    """Returns the highest upload_date (YYYYMMDD) already recorded for the channel, or '' if empty."""
     db = get_db()
     row = db.execute(
         "SELECT MAX(upload_date) AS m FROM tiktok_videos WHERE channel_handle=? AND upload_date!=''",

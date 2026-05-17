@@ -6,7 +6,9 @@ Reads/writes to local SQLite database and syncs with YouTube channel.
 
 import json
 import os
+import shutil
 import sys
+import time
 import base64
 import urllib.request
 import urllib.parse
@@ -35,9 +37,14 @@ import secrets as _sec
 
 _DASHBOARD_PASSWORD = os.environ.get('DASHBOARD_PASSWORD', 'Inema2026$$$')
 _VALID_SESSIONS = set()
+import threading as _threading
+_LOGIN_ATTEMPTS: dict = {}   # ip -> [timestamp, ...]
+_LOGIN_LOCK = _threading.Lock()
+_MAX_LOGIN_ATTEMPTS = 5
+_LOGIN_WINDOW_SECONDS = 300  # 5-minute window
 
 _LOGIN_HTML = '''<!doctype html>
-<html lang="pt-br">
+<html lang="en">
 <head><meta charset="utf-8"><title>Login — YT Pub Lives</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
@@ -58,9 +65,9 @@ button:hover{background:#4f46e5}
 <body>
 <div class="card">
   <h2>YT Pub Lives</h2>
-  <label>Senha</label>
+  <label>Password</label>
   <input type="password" id="pw" placeholder="••••••••" autofocus>
-  <button onclick="login()">Entrar</button>
+  <button onclick="login()">Sign in</button>
   <div class="err" id="err"></div>
 </div>
 <script>
@@ -71,7 +78,7 @@ async function login(){
     body:JSON.stringify({password:document.getElementById('pw').value})});
   const d=await r.json();
   if(d.ok)location.href='/';
-  else document.getElementById('err').textContent='Senha incorreta';
+  else document.getElementById('err').textContent='Incorrect password';
 }
 </script>
 </body></html>'''
@@ -176,7 +183,23 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
     def _handle_login(self, data):
         global _DASHBOARD_PASSWORD
+        ip = self.client_address[0]
+        now = time.time()
+
+        with _LOGIN_LOCK:
+            attempts = [t for t in _LOGIN_ATTEMPTS.get(ip, []) if now - t < _LOGIN_WINDOW_SECONDS]
+            if len(attempts) >= _MAX_LOGIN_ATTEMPTS:
+                _LOGIN_ATTEMPTS[ip] = attempts
+                self.send_response(429)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Retry-After', str(_LOGIN_WINDOW_SECONDS))
+                self.end_headers()
+                self.wfile.write(b'{"ok":false,"error":"too many attempts"}')
+                return
+
         if data.get('password') == _DASHBOARD_PASSWORD:
+            with _LOGIN_LOCK:
+                _LOGIN_ATTEMPTS.pop(ip, None)
             token = _sec.token_hex(32)
             _VALID_SESSIONS.add(token)
             self.send_response(200)
@@ -185,6 +208,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b'{"ok":true}')
         else:
+            with _LOGIN_LOCK:
+                attempts = [t for t in _LOGIN_ATTEMPTS.get(ip, []) if now - t < _LOGIN_WINDOW_SECONDS]
+                attempts.append(now)
+                _LOGIN_ATTEMPTS[ip] = attempts
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
@@ -201,15 +228,42 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         self.send_header('Location', '/login')
         self.end_headers()
 
+    def _handle_health_ping(self):
+        """Lightweight no-auth health check for master-dashboard polling."""
+        scheduler_state = 'offline'
+        try:
+            status_file = os.path.join(os.path.dirname(__file__), 'scheduler_status.json')
+            if os.path.exists(status_file):
+                with open(status_file) as f:
+                    st = json.load(f)
+                scheduler_state = st.get('state', 'offline')
+        except Exception:
+            pass
+
+        disk_free_gb = None
+        try:
+            lives_dir = os.environ.get('LIVES_DIR', os.path.join(PROJECT_ROOT, 'lives'))
+            check_path = lives_dir if os.path.exists(lives_dir) else PROJECT_ROOT
+            disk_free_gb = round(shutil.disk_usage(check_path).free / (1024 ** 3), 1)
+        except Exception:
+            pass
+
+        self.send_json(200, {
+            'ok': True,
+            'instance': os.environ.get('INSTANCE_NAME', 'yt-pub-lives'),
+            'scheduler_state': scheduler_state,
+            'disk_free_gb': disk_free_gb,
+        })
+
     def _handle_password_change(self, data):
         global _DASHBOARD_PASSWORD
         current = data.get('current', '')
         new_pw = data.get('new', '').strip()
         if current != _DASHBOARD_PASSWORD:
-            self.send_json(403, {'error': 'senha atual incorreta'})
+            self.send_json(403, {'error': 'current password is incorrect'})
             return
         if not new_pw:
-            self.send_json(400, {'error': 'nova senha nao pode ser vazia'})
+            self.send_json(400, {'error': 'new password cannot be empty'})
             return
         if os.path.exists(ENV_FILE):
             with open(ENV_FILE) as f:
@@ -239,6 +293,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self.send_header('Content-Type', 'text/html; charset=utf-8')
             self.end_headers()
             self.wfile.write(_LOGIN_HTML.encode())
+            return
+
+        if path == '/api/health/ping':
+            self._handle_health_ping()
             return
 
         if not self._require_auth():
@@ -468,7 +526,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         # yt-dlp
         try:
             r = subprocess.run(['yt-dlp', '--version'], capture_output=True, text=True, timeout=5)
-            checks['yt_dlp'] = {'ok': r.returncode == 0, 'detail': r.stdout.strip() if r.returncode == 0 else 'erro'}
+            checks['yt_dlp'] = {'ok': r.returncode == 0, 'detail': r.stdout.strip() if r.returncode == 0 else 'error'}
         except Exception as e:
             checks['yt_dlp'] = {'ok': False, 'detail': str(e)}
 
@@ -479,14 +537,14 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         except Exception as e:
             checks['database'] = {'ok': False, 'detail': str(e)}
 
-        # Claude CLI (IA cortes/pub)
+        # Claude CLI (AI cuts/pub)
         try:
-            r = subprocess.run(['claude', '-p', '--output-format', 'json', 'diga ok'], capture_output=True, text=True, timeout=30)
-            checks['api_ia'] = {'ok': r.returncode == 0, 'detail': 'Claude CLI ok' if r.returncode == 0 else f'erro code {r.returncode}'}
+            r = subprocess.run(['claude', '-p', '--output-format', 'json', 'say ok'], capture_output=True, text=True, timeout=30)
+            checks['api_ia'] = {'ok': r.returncode == 0, 'detail': 'Claude CLI ok' if r.returncode == 0 else f'error code {r.returncode}'}
         except Exception as e:
             checks['api_ia'] = {'ok': False, 'detail': str(e)[:80]}
 
-        # Piramyd API key (para thumbnail)
+        # Piramyd API key (for thumbnail)
         env_file = os.path.join(CONFIG_DIR, '.env')
         api_key = ''
         if os.path.exists(env_file):
@@ -497,7 +555,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         if not api_key:
             api_key = os.environ.get('PIRAMYD_API_KEY', '')
 
-        # Thumbnail API - testa o provider configurado
+        # Thumbnail API - test the configured provider
         try:
             cfg = db.load_config()
             img_provider = cfg.get('thumb_image_provider', 'piramyd')
@@ -505,13 +563,13 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             if img_provider == 'kie':
                 kie_key = cfg.get('kie_api_key', '')
                 if kie_key:
-                    # Testar Kie.ai listando jobs (leve, sem gerar imagem)
+                    # Test Kie.ai by listing jobs (lightweight, no image generation)
                     req = urllib.request.Request('https://api.kie.ai/api/v1/jobs/recordInfo?taskId=test')
                     req.add_header('Authorization', f'Bearer {kie_key}')
                     urllib.request.urlopen(req, timeout=10)
                     checks['api_thumb'] = {'ok': True, 'detail': f'kie ok'}
                 else:
-                    checks['api_thumb'] = {'ok': False, 'detail': 'sem kie_api_key'}
+                    checks['api_thumb'] = {'ok': False, 'detail': 'no kie_api_key'}
             elif img_provider == 'piramyd':
                 if api_key:
                     payload = json.dumps({'model': 'chatgpt-4.1', 'messages': [{'role': 'user', 'content': 'ok'}], 'max_tokens': 1}).encode()
@@ -521,7 +579,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                     urllib.request.urlopen(req, timeout=15)
                     checks['api_thumb'] = {'ok': True, 'detail': 'piramyd ok'}
                 else:
-                    checks['api_thumb'] = {'ok': False, 'detail': 'sem piramyd key'}
+                    checks['api_thumb'] = {'ok': False, 'detail': 'no piramyd key'}
             elif img_provider == 'local':
                 url = cfg.get('inemaimg_url', '') or 'http://localhost:8000'
                 try:
@@ -530,7 +588,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 except Exception as e:
                     checks['api_thumb'] = {'ok': False, 'detail': f'inemaimg down: {str(e)[:60]}'}
             else:
-                checks['api_thumb'] = {'ok': True, 'detail': f'{img_provider} (sem teste)'}
+                checks['api_thumb'] = {'ok': True, 'detail': f'{img_provider} (no test)'}
         except Exception as e:
             checks['api_thumb'] = {'ok': False, 'detail': str(e)[:80]}
 
@@ -540,7 +598,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             if 'items' in result:
                 checks['youtube'] = {'ok': True, 'detail': result['items'][0]['snippet']['title']}
             else:
-                checks['youtube'] = {'ok': False, 'detail': result.get('error', 'sem resposta')[:80]}
+                checks['youtube'] = {'ok': False, 'detail': result.get('error', 'no response')[:80]}
         except Exception as e:
             checks['youtube'] = {'ok': False, 'detail': str(e)[:80]}
 
@@ -565,7 +623,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 data = json.load(f)
             self.send_json(200, data)
         else:
-            self.send_json(200, {'state': 'offline', 'detail': 'Scheduler nao iniciado', 'updated_at': ''})
+            self.send_json(200, {'state': 'offline', 'detail': 'Scheduler not started', 'updated_at': ''})
 
     def handle_serve_clip(self, path):
         """Serve clip files from lives directory."""
@@ -623,7 +681,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         missing = [(l['video_id'],) for l in lives if l.get('video_id') and not l.get('data_live')]
 
         if not missing:
-            self.send_json(200, {'ok': True, 'fixed': 0, 'message': 'Todas as lives ja tem data'})
+            self.send_json(200, {'ok': True, 'fixed': 0, 'message': 'All lives already have a date'})
             return
 
         # Fetch dates from YouTube in batches of 50
@@ -649,23 +707,23 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         self.send_json(200, {'ok': True, **result})
 
     def handle_import_scan(self):
-        """Dispara o import_worker manualmente: processa pastas em imports/."""
+        """Manually trigger import_worker: processes folders in imports/."""
         try:
             sys.path.insert(0, PROJECT_ROOT)
             import import_worker
             config = db.load_config()
             results = import_worker.process_imports(config)
             ok = [r for r in results if r.get('ok')]
-            self.send_json(200, {'ok': True, 'processados': len(ok), 'total': len(results), 'detalhes': results})
+            self.send_json(200, {'ok': True, 'processed': len(ok), 'total': len(results), 'details': results})
         except Exception as e:
             self.send_json(500, {'error': str(e)})
 
     def handle_import_clean(self, data):
         """
-        Limpeza de pastas.
-        action: 'imports'          — limpa imports/ (residuos nao processados)
-                'clips'            — limpa clips/ das lives totalmente publicadas
-                'clips_all'        — limpa clips/ de TODAS as lives (cuidado)
+        Folder cleanup.
+        action: 'imports'          — clean imports/ (unprocessed residues)
+                'clips'            — clean clips/ for fully published lives
+                'clips_all'        — clean clips/ for ALL lives (use with care)
         """
         try:
             sys.path.insert(0, PROJECT_ROOT)
@@ -673,15 +731,15 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             action = data.get('action', 'imports')
             if action == 'imports':
                 n = import_worker.clean_imports()
-                self.send_json(200, {'ok': True, 'removidos': n})
+                self.send_json(200, {'ok': True, 'removed': n})
             elif action == 'clips':
                 n = import_worker.clean_clips(only_fully_published=True)
-                self.send_json(200, {'ok': True, 'lives_limpas': n})
+                self.send_json(200, {'ok': True, 'lives_cleaned': n})
             elif action == 'clips_all':
                 n = import_worker.clean_clips(only_fully_published=False)
-                self.send_json(200, {'ok': True, 'lives_limpas': n})
+                self.send_json(200, {'ok': True, 'lives_cleaned': n})
             else:
-                self.send_json(400, {'error': f'action invalida: {action}'})
+                self.send_json(400, {'error': f'invalid action: {action}'})
         except Exception as e:
             self.send_json(500, {'error': str(e)})
 
@@ -719,7 +777,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         if m:
             vid = m.group(1)
         if not vid:
-            self.send_json(400, {'error': 'URL invalida — nao encontrei video ID'})
+            self.send_json(400, {'error': 'Invalid URL — could not find video ID'})
             return
 
         try:
@@ -727,7 +785,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             details = get_video_details([vid])
             items = details.get('items', [])
             if not items:
-                self.send_json(404, {'error': f'Video {vid} nao encontrado no YouTube'})
+                self.send_json(404, {'error': f'Video {vid} not found on YouTube'})
                 return
 
             item = items[0]
@@ -825,7 +883,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         self.send_json(200, {'ok': True})
 
     def handle_tiktok_scan(self, data=None):
-        """Scan completo (popula fila). body opcional: {channel_id, playlist_end, download_after}."""
+        """Full scan (populates queue). optional body: {channel_id, playlist_end, download_after}."""
         try:
             sys.path.insert(0, PROJECT_ROOT)
             import tiktok_scanner
@@ -856,7 +914,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self.send_json(500, {'error': str(e)})
 
     def handle_tiktok_fetch_latest(self, data):
-        """Fetch incremental: scan com early-break no cutoff (MAX upload_date).
+        """Fetch incremental: scan with early-break at cutoff (MAX upload_date).
 
         Body: {channel_id?, include_inactive?, download_after?}.
         """
@@ -885,7 +943,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self.send_json(500, {'error': str(e)})
 
     def handle_tiktok_download(self):
-        """Dispara download imediato da fila (sem scan)."""
+        """Trigger immediate download from queue (no scan)."""
         try:
             sys.path.insert(0, PROJECT_ROOT)
             import tiktok_scanner
@@ -896,7 +954,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self.send_json(500, {'error': str(e)})
 
     def handle_tiktok_queue(self, qs):
-        """GET /api/tiktok/queue?channel=@x&status=pendente&limit=50."""
+        """GET /api/tiktok/queue?channel=@x&status=pending&limit=50."""
         channel = qs.get('channel', [''])[0]
         status = qs.get('status', ['pendente'])[0]
         limit = int(qs.get('limit', ['50'])[0])
@@ -912,7 +970,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self.send_json(500, {'error': str(e)})
 
     def handle_tiktok_download_url(self, data):
-        """Download avulso via URL. Se handle for de canal registrado, usa a fila; senao salva em imports/ manual."""
+        """One-off download via URL. If handle belongs to a registered channel, uses the queue; otherwise saves to imports/ manually."""
         url = data.get('url', '').strip()
         if not url:
             self.send_json(400, {'error': 'url required'})
@@ -927,7 +985,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 capture_output=True, text=True, timeout=120
             )
             if result.returncode != 0:
-                self.send_json(500, {'error': f'yt-dlp erro: {result.stderr[:200]}'})
+                self.send_json(500, {'error': f'yt-dlp error: {result.stderr[:200]}'})
                 return
 
             info = json.loads(result.stdout)
@@ -1012,7 +1070,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                     manifests_cache[lid] = {}
             pub['filename'] = manifests_cache.get(lid, {}).get(pub.get('clip_titulo', ''), '')
 
-        # Incluir clips pendentes (cortados mas nao publicados)
+        # Include pending clips (cut but not yet published)
         pendentes = []
         lives_dir = os.environ.get('LIVES_DIR', os.path.join(PROJECT_ROOT, 'lives'))
         pub_titles = set(p.get('clip_titulo', '') for p in publicados)
@@ -1033,7 +1091,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             is_import = lid.startswith('import_')
 
             if is_import and not os.path.exists(topics_path):
-                # Imports: usa clips_manifest.json como fonte de pendentes
+                # Imports: use clips_manifest.json as the source of pending clips
                 if not os.path.exists(manifest_path):
                     continue
                 try:
@@ -1249,7 +1307,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 else:
                     total_publicados += 1
 
-        # Clips pendentes de imports (no manifest mas nao no publicados)
+        # Pending clips from imports (in manifest but not in published)
         pub_titles_by_live = {}
         for pub in pub_list:
             lid = pub.get('live_video_id', '')
@@ -1270,15 +1328,15 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 except Exception:
                     pass
 
-        # Motivo de nao rodar imports
+        # Reason for not running imports
         config = db.load_config()
         import_motivo = ''
         if config.get('pipeline_imports_paused', 'false') == 'true':
-            import_motivo = 'pausado'
+            import_motivo = 'paused'
         elif not config.get('import_pub_horarios', '').strip():
-            import_motivo = 'sem horario'
+            import_motivo = 'no schedule'
         elif imports_total == 0 and imports_clips_pend > 0:
-            import_motivo = 'fila vazia'
+            import_motivo = 'empty queue'
 
         # TikTok stats
         tiktok_total = len(tiktok_ids)
@@ -1288,7 +1346,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         )
         tiktok_pend = max(0, tiktok_clips_total - tiktok_pub - tiktok_erro)
 
-        # Publicados nas ultimas 24h por tipo
+        # Published in the last 24h by type
         from datetime import datetime as _dt, timedelta
         since_24h = (_dt.now() - timedelta(hours=24)).strftime('%Y-%m-%d %H:%M')
         clips_24h = 0
@@ -1346,20 +1404,20 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
         m = re.search(r'(?:v=|youtu\.be/|shorts/)([a-zA-Z0-9_-]{11})', url)
         if not m:
-            self.send_json(400, {'error': 'URL invalida — nao encontrei video ID'})
+            self.send_json(400, {'error': 'Invalid URL — could not find video ID'})
             return
         vid = m.group(1)
 
         existing = db.get_live(vid)
         if existing:
-            self.send_json(200, {'ok': True, 'video_id': vid, 'titulo': existing.get('titulo', ''), 'message': 'ja existe no banco'})
+            self.send_json(200, {'ok': True, 'video_id': vid, 'titulo': existing.get('titulo', ''), 'message': 'already exists in database'})
             return
 
         try:
             details = get_video_details([vid])
             items = details.get('items', [])
             if not items:
-                self.send_json(404, {'error': f'Video {vid} nao encontrado no YouTube'})
+                self.send_json(404, {'error': f'Video {vid} not found on YouTube'})
                 return
 
             item = items[0]
@@ -1404,19 +1462,19 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         max_lives = data.get('max_lives', 50)
         max_pages = (max_lives // 50) + 1
 
-        # Validar formato e validade das datas (YYYY-MM-DD)
+        # Validate date format and value (YYYY-MM-DD)
         import re as _re
         from datetime import datetime as _dt
         date_pattern = _re.compile(r'^\d{4}-\d{2}-\d{2}$')
-        for label, val in [('inicio', date_from), ('fim', date_to)]:
+        for label, val in [('start', date_from), ('end', date_to)]:
             if val:
                 if not date_pattern.match(val):
-                    self.send_json(400, {'error': f'Data {label} invalida: "{val}". Use formato YYYY-MM-DD'})
+                    self.send_json(400, {'error': f'Invalid {label} date: "{val}". Use YYYY-MM-DD format'})
                     return
                 try:
                     _dt.strptime(val, '%Y-%m-%d')
                 except ValueError:
-                    self.send_json(400, {'error': f'Data {label} nao existe: "{val}" (ex: setembro tem 30 dias)'})
+                    self.send_json(400, {'error': f'{label} date does not exist: "{val}" (e.g. September has 30 days)'})
                     return
 
         # Build date filters for YouTube API (ISO 8601)
@@ -1445,7 +1503,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                     continue
                 snippet = item.get('snippet', {})
                 pub_date = snippet.get('publishedAt', '')[:10]
-                # Filtro server-side: YouTube API nem sempre respeita publishedBefore/After
+                # Server-side filter: YouTube API does not always honor publishedBefore/After
                 if date_from and pub_date < date_from:
                     continue
                 if date_to and pub_date > date_to:
@@ -1682,8 +1740,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         self.send_json(200, {'ok': True, 'removed': original_len - len(clips)})
 
     def handle_cleanup_clips(self, data):
-        """Deleta arquivos mp4 dos clips do disco. Mantem manifest e planilha."""
-        video_id = data.get('video_id', '')  # opcional: limpar só uma live
+        """Delete clip mp4 files from disk. Keeps manifest and spreadsheet."""
+        video_id = data.get('video_id', '')  # optional: clean only one live
         lives_dir = os.environ.get('LIVES_DIR', os.path.join(PROJECT_ROOT, 'lives'))
         deleted = 0
         freed = 0
@@ -1709,8 +1767,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         self.send_json(200, {'ok': True, 'deleted': deleted, 'freed_mb': round(freed_mb, 1)})
 
     def handle_cleanup_sources(self, data):
-        """Deleta arquivos source.mp4 (videos originais) do disco. Mantem clips e manifest."""
-        video_id = data.get('video_id', '')  # opcional: limpar só uma live
+        """Delete source.mp4 files (original videos) from disk. Keeps clips and manifest."""
+        video_id = data.get('video_id', '')  # optional: clean only one live
         lives_dir = os.environ.get('LIVES_DIR', os.path.join(PROJECT_ROOT, 'lives'))
         deleted = 0
         freed = 0
@@ -1732,7 +1790,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         self.send_json(200, {'ok': True, 'deleted': deleted, 'freed_mb': round(freed_mb, 1)})
 
     def handle_live_delete(self, data):
-        """Deleta live: remove arquivos do disco E remove do banco de dados."""
+        """Delete live: removes files from disk AND removes from the database."""
         import shutil
         video_id = data.get('video_id', '')
         if not video_id:
@@ -1747,7 +1805,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         # Remove from database
         db.delete_live(video_id)
 
-        # Remove arquivos do disco
+        # Remove files from disk
         lives_dir = os.environ.get('LIVES_DIR', os.path.join(PROJECT_ROOT, 'lives'))
         job_dir = os.path.join(lives_dir, video_id)
         freed = 0
@@ -1819,7 +1877,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                     # Add remaining clips that haven't been processed
                     idx = clips.index(clip)
                     remaining.extend(clips[idx + 1:])
-                    error_details.append('Quota excedida - parou')
+                    error_details.append('Quota exceeded - stopped')
                     break
                 errors += 1
                 error_details.append(f'{clip.get("title", vid)[:40]}: {err_msg[:60]}')
@@ -1851,7 +1909,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self.send_json(404, {'error': 'no erro_upload found for this clip'})
             return
 
-        self.send_json(200, {'ok': True, 'message': f'Clip "{title[:50]}" devolvido para a fila', 'cleared': cleared})
+        self.send_json(200, {'ok': True, 'message': f'Clip "{title[:50]}" returned to queue', 'cleared': cleared})
 
     def handle_clip_dismiss_erro(self, data):
         """Remove erro_upload entries so clip becomes pendente again."""
@@ -1890,8 +1948,8 @@ if __name__ == '__main__':
         daemon_threads = True
 
     server = ThreadedHTTPServer(('0.0.0.0', port), DashboardHandler)
-    print(f'Dashboard rodando em http://localhost:{port}')
+    print(f'Dashboard running at http://localhost:{port}')
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print('\nServidor encerrado.')
+        print('\nServer stopped.')

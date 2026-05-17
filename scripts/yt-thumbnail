@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-yt-thumbnail — Gera thumbnails para clips do YouTube
-Usa LLM para criar prompt estruturado + IA para gerar imagem
+yt-thumbnail — Generates thumbnails for YouTube clips
+Uses an LLM to create a structured prompt + AI to generate the image
 
-Uso:
-  yt-thumbnail --title "Titulo do clip" --output thumb.jpg
-  yt-thumbnail --title "Titulo" --description "Sobre o que eh o clip"
+Usage:
+  yt-thumbnail --title "Clip title" --output thumb.jpg
+  yt-thumbnail --title "Title" --description "What the clip is about"
 """
 
 import sys
@@ -58,7 +58,7 @@ def _get_llm_chain():
         if provider not in PROVIDER_MAP:
             continue
         if provider == 'claude-oauth':
-            # Claude CLI nao precisa de key nem model
+            # Claude CLI does not need a key or model
             chain.append({'provider': 'claude-oauth', 'model': model or 'default', 'url': None, 'api_key': None})
             continue
         if not model:
@@ -68,7 +68,7 @@ def _get_llm_chain():
         if not api_key:
             continue
         chain.append({'provider': provider, 'model': model, 'url': info['url'], 'api_key': api_key})
-    # Fallback: se nenhum configurado, usa o comportamento original
+    # Fallback: if none configured, use original behavior
     if not chain and PIRAMYD_API_KEY:
         chain.append({'provider': 'piramyd', 'model': CHAT_MODEL, 'url': PIRAMYD_URL, 'api_key': PIRAMYD_API_KEY})
     return chain
@@ -142,10 +142,10 @@ def _call_llm_claude_oauth(system_prompt, user_msg):
         capture_output=True, text=True, timeout=120
     )
     if result.returncode != 0:
-        raise RuntimeError(f'Claude CLI erro (code {result.returncode}): {result.stderr[:200]}')
+        raise RuntimeError(f'Claude CLI error (code {result.returncode}): {result.stderr[:200]}')
     data = json.loads(result.stdout)
     if data.get('is_error'):
-        raise RuntimeError(f'Claude CLI retornou erro: {data.get("result", "")[:200]}')
+        raise RuntimeError(f'Claude CLI returned error: {data.get("result", "")[:200]}')
     return data.get('result', '')
 
 
@@ -188,10 +188,10 @@ def _call_llm(provider_cfg, messages):
 
 
 def generate_prompt_json(title, description=''):
-    """Usa LLM para gerar o JSON estruturado do prompt. Tenta multiplos providers."""
-    user_msg = f'Titulo do video: "{title}"'
+    """Uses LLM to generate the structured prompt JSON. Tries multiple providers."""
+    user_msg = f'Video title: "{title}"'
     if description:
-        user_msg += f'\nDescricao: {description}'
+        user_msg += f'\nDescription: {description}'
 
     messages = [
         {'role': 'system', 'content': SYSTEM_PROMPT},
@@ -200,7 +200,7 @@ def generate_prompt_json(title, description=''):
 
     chain = _get_llm_chain()
     if not chain:
-        raise ValueError('Nenhum provider LLM configurado')
+        raise ValueError('No LLM provider configured')
 
     import re
     last_err = None
@@ -216,7 +216,7 @@ def generate_prompt_json(title, description=''):
             json_match = re.search(r'\{[\s\S]*\}', content)
             if json_match:
                 return json.loads(json_match.group())
-            raise ValueError(f'LLM nao retornou JSON valido: {content[:200]}')
+            raise ValueError(f'LLM did not return valid JSON: {content[:200]}')
         except Exception as e:
             last_err = e
             print(f'  LLM {i} falhou ({cfg["provider"]}/{cfg["model"]}): {e}', file=sys.stderr, flush=True)
@@ -226,7 +226,7 @@ def generate_prompt_json(title, description=''):
 
 
 def build_image_prompt(prompt_data):
-    """Monta o prompt final para o gerador de imagem."""
+    """Builds the final prompt for the image generator."""
     return (
         f'IMPORTANT: DO NOT include any text, letters, words or writing in the image. '
         f'Professional YouTube thumbnail, photorealistic, cinematic lighting. '
@@ -263,7 +263,7 @@ KIE_ENDPOINTS = {
 
 
 def _generate_image_piramyd(image_prompt):
-    """Gera imagem via Piramyd API (sincrono, OpenAI-compatible)."""
+    """Generates image via Piramyd API (synchronous, OpenAI-compatible)."""
     payload = {
         'model': IMAGE_MODEL,
         'prompt': image_prompt,
@@ -279,21 +279,21 @@ def _generate_image_piramyd(image_prompt):
     result = json.loads(resp.read())
     data = result.get('data', [])
     if not data or not data[0].get('url'):
-        raise ValueError('Piramyd nao retornou imagem')
+        raise ValueError('Piramyd did not return an image')
     return data[0]['url']
 
 
 def _generate_image_kie(image_prompt):
-    """Gera imagem via Kie.ai API (assincrono, polling)."""
+    """Generates image via Kie.ai API (asynchronous, polling)."""
     import time
     model = IMAGE_MODEL
 
-    # Modelos que usam /jobs/createTask (novo endpoint unificado)
+    # Models that use /jobs/createTask (new unified endpoint)
     if model in ('z-image',):
-        # z-image tem limite de 1000 chars e funciona melhor com prompts curtos
+        # z-image has a 1000 char limit and works better with short prompts
         short_prompt = image_prompt
         if len(image_prompt) > 400:
-            # Extrair essencia: pegar ate o primeiro ponto da cena + cores
+            # Extract essence: take up to first scene period + colors
             parts = image_prompt.split('. ')
             short_prompt = '. '.join(parts[:3])[:400]
             if not short_prompt.endswith('.'):
@@ -335,7 +335,7 @@ def _generate_image_kie(image_prompt):
         raise ValueError(f'Kie erro: {result.get("msg", "unknown")}')
 
     task_id = result['data']['taskId']
-    print(f'  Kie task: {task_id}, aguardando...', flush=True)
+    print(f'  Kie task: {task_id}, waiting...', flush=True)
 
     # Poll for result (max 180s)
     for attempt in range(60):
@@ -353,18 +353,18 @@ def _generate_image_kie(image_prompt):
             urls = result_json.get('resultUrls', [])
             if urls:
                 return urls[0]
-            raise ValueError('Kie retornou sucesso mas sem URL')
+            raise ValueError('Kie returned success but no URL')
         elif state == 'fail':
-            raise ValueError(f'Kie task falhou: {poll_data}')
+            raise ValueError(f'Kie task failed: {poll_data}')
         # waiting/queuing/generating/null -> continue
         if attempt % 10 == 9:
-            print(f'  Kie ainda processando... ({(attempt+1)*3}s)', flush=True)
+            print(f'  Kie still processing... ({(attempt+1)*3}s)', flush=True)
 
     raise ValueError('Kie timeout (180s)')
 
 
 def _generate_image_minimax(image_prompt):
-    """Gera imagem via MiniMax API (image-01)."""
+    """Generates image via MiniMax API (image-01)."""
     import base64 as b64
     payload = {
         'model': 'image-01',
@@ -382,25 +382,25 @@ def _generate_image_minimax(image_prompt):
 
     base_resp = result.get('base_resp', {})
     if base_resp.get('status_code', 0) != 0:
-        raise ValueError(f'MiniMax erro: {base_resp.get("status_msg", "unknown")}')
+        raise ValueError(f'MiniMax error: {base_resp.get("status_msg", "unknown")}')
 
     data = result.get('data', [])
     if not data:
-        raise ValueError('MiniMax nao retornou imagem')
+        raise ValueError('MiniMax did not return an image')
 
     img_b64 = data[0].get('b64_image', '')
     if not img_b64:
-        raise ValueError('MiniMax sem base64 na resposta')
+        raise ValueError('MiniMax returned no base64 in response')
 
     img_bytes = b64.b64decode(img_b64)
     return img_bytes
 
 
 def _generate_image_local(image_prompt):
-    """Gera imagem via inemaimg local (FastAPI em INEMAIMG_URL, padrao do imkt4/timesmkt3)."""
+    """Generates image via local inemaimg (FastAPI at INEMAIMG_URL, default from imkt4/timesmkt3)."""
     import base64 as b64
     model = IMAGE_MODEL or INEMAIMG_MODEL_DEFAULT
-    # 1024x576 = 16:9 exato e multiplos de 64 (requisito do servidor)
+    # 1024x576 = exact 16:9 and multiples of 64 (server requirement)
     payload = {
         'model': model,
         'prompt': image_prompt,
@@ -415,12 +415,12 @@ def _generate_image_local(image_prompt):
     result = json.loads(resp.read())
     img_b64 = result.get('image')
     if not img_b64:
-        raise ValueError(f'inemaimg nao retornou image. keys={list(result.keys())}')
+        raise ValueError(f'inemaimg did not return image. keys={list(result.keys())}')
     return b64.b64decode(img_b64)
 
 
 def _generate_image_google(image_prompt):
-    """Gera imagem via Google Imagen API."""
+    """Generates image via Google Imagen API."""
     import base64 as b64
     model = GOOGLE_IMAGE_MODEL
     payload = {
@@ -436,14 +436,14 @@ def _generate_image_google(image_prompt):
     result = json.loads(resp.read())
     predictions = result.get('predictions', [])
     if not predictions:
-        raise ValueError('Google Imagen nao retornou imagem')
+        raise ValueError('Google Imagen did not return an image')
 
     img_bytes = b64.b64decode(predictions[0]['bytesBase64Encoded'])
     return img_bytes
 
 
 def generate_ai_image(image_prompt):
-    """Gera imagem usando o provider configurado."""
+    """Generates image using the configured provider."""
     provider = IMAGE_PROVIDER
     print(f'  [2/3] Gerando imagem com {provider}/{IMAGE_MODEL}...', flush=True)
 
@@ -474,7 +474,7 @@ def generate_ai_image(image_prompt):
 
 
 def create_gradient_bg():
-    """Fallback local."""
+    """Local fallback background."""
     img = Image.new('RGB', (WIDTH, HEIGHT))
     for y in range(HEIGHT):
         r = int(10 + 10 * y / HEIGHT)
@@ -486,7 +486,7 @@ def create_gradient_bg():
 
 
 def wrap_text(text, font, max_width, draw):
-    """Quebra texto em linhas."""
+    """Wraps text into lines."""
     words = text.split()
     lines = []
     current = ''
@@ -540,8 +540,8 @@ PRESETS = {
 
 
 def compose_thumbnail(bg, frase_curta, cores_str, output_path):
-    """Compoe thumbnail final: imagem + texto overlay com design configuravel."""
-    # Se tem random preset selecionado, aplicar env vars (salvo ou hardcoded)
+    """Composes final thumbnail: image + text overlay with configurable design."""
+    # If a random preset is selected, apply env vars (saved or hardcoded)
     random_preset = os.environ.get('DESIGN_RANDOM_PRESET', '')
     if random_preset:
         # Tentar carregar preset salvo (customizado) do env
@@ -722,7 +722,7 @@ def compose_thumbnail(bg, frase_curta, cores_str, output_path):
                     if dx != 0 or dy != 0:
                         draw.text((lx + dx, y + dy), line, font=cur_font, fill=design_shadow_color)
 
-    # --- Stroke (borda) ---
+    # --- Stroke (border) ---
     if design_stroke_enabled:
         for i, line in enumerate(lines):
             y = y_start + i * design_line_height
@@ -737,7 +737,7 @@ def compose_thumbnail(bg, frase_curta, cores_str, output_path):
             sz = design_stroke_size
             for dx in range(-sz, sz + 1):
                 for dy in range(-sz, sz + 1):
-                    if abs(dx) + abs(dy) >= sz:  # só bordas externas
+                    if abs(dx) + abs(dy) >= sz:  # outer edges only
                         draw.text((lx + dx, y + dy), line, font=cur_font, fill=design_stroke_color)
 
     # --- Main text ---
@@ -800,34 +800,34 @@ def compose_thumbnail(bg, frase_curta, cores_str, output_path):
 
 
 def generate_thumbnail(title, description='', output_path='thumbnail.jpg'):
-    """Pipeline completo: LLM prompt -> IA image -> Pillow compose."""
+    """Full pipeline: LLM prompt -> AI image -> Pillow compose."""
     try:
-        # 1. LLM gera prompt estruturado
+        # 1. LLM generates structured prompt
         prompt_data = generate_prompt_json(title, description)
-        print(f'  Frase: "{prompt_data["frase_curta"]}"', flush=True)
-        print(f'  Cena: {prompt_data["cena_principal"][:80]}...', flush=True)
+        print(f'  Phrase: "{prompt_data["frase_curta"]}"', flush=True)
+        print(f'  Scene: {prompt_data["cena_principal"][:80]}...', flush=True)
 
-        # 2. Gera imagem
+        # 2. Generate image
         image_prompt = build_image_prompt(prompt_data)
         bg = generate_ai_image(image_prompt)
 
-        # 3. Compoe thumbnail
-        print('  [3/3] Compondo thumbnail...', flush=True)
+        # 3. Compose thumbnail
+        print('  [3/3] Composing thumbnail...', flush=True)
         result = compose_thumbnail(bg, prompt_data['frase_curta'],
                                    prompt_data.get('cores_dominantes', ''),
                                    output_path)
 
-        # Salva JSON do prompt para referencia
+        # Save prompt JSON for reference
         json_path = output_path.rsplit('.', 1)[0] + '_prompt.json'
         with open(json_path, 'w') as f:
             json.dump(prompt_data, f, ensure_ascii=False, indent=2)
 
-        print(f'  Thumbnail salva: {result}', flush=True)
+        print(f'  Thumbnail saved: {result}', flush=True)
         return result
 
     except Exception as e:
-        print(f'  Erro no pipeline: {e}', file=sys.stderr)
-        print(f'  Usando fallback local...', flush=True)
+        print(f'  Pipeline error: {e}', file=sys.stderr)
+        print(f'  Using local fallback...', flush=True)
 
         bg = create_gradient_bg()
         result = compose_thumbnail(bg, title[:70], '', output_path)
@@ -837,11 +837,11 @@ def generate_thumbnail(title, description='', output_path='thumbnail.jpg'):
 
 if __name__ == '__main__':
     import argparse
-    parser = argparse.ArgumentParser(description='Gera thumbnail para clip YouTube com IA')
-    parser.add_argument('--title', '-t', required=True, help='Titulo do clip')
-    parser.add_argument('--description', '-d', default='', help='Descricao do conteudo')
-    parser.add_argument('--output', '-o', default='thumbnail.jpg', help='Arquivo de saida')
-    parser.add_argument('--model', '-m', default=None, help='Modelo de imagem')
+    parser = argparse.ArgumentParser(description='Generate YouTube clip thumbnail with AI')
+    parser.add_argument('--title', '-t', required=True, help='Clip title')
+    parser.add_argument('--description', '-d', default='', help='Content description')
+    parser.add_argument('--output', '-o', default='thumbnail.jpg', help='Output file')
+    parser.add_argument('--model', '-m', default=None, help='Image model')
     args = parser.parse_args()
 
     if args.model:

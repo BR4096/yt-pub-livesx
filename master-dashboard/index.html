@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -335,11 +335,11 @@
     <div class="header-right">
       <span class="telegram-badge" id="telegramBadge">Telegram: --</span>
       <span class="meta">Heartbeat: <span id="countdown">--</span></span>
-      <span class="meta">Atualizado: <span id="updatedAt">--</span></span>
-      <button id="btnDistribuir" style="background:rgba(139,92,246,0.3);color:#a78bfa;border:1px solid #a78bfa" onclick="distribuirImports()">Distribuir Imports</button>
-      <button style="background:#065f46" onclick="checkAllOAuth()">Testar Todos OAuth</button>
-      <button class="terminal-btn" onclick="toggleTerminal(null)">Terminal Geral</button>
-      <button onclick="refresh()">Atualizar</button>
+      <span class="meta">Updated: <span id="updatedAt">--</span></span>
+      <button id="btnDistribuir" style="background:rgba(139,92,246,0.3);color:#a78bfa;border:1px solid #a78bfa" onclick="distribuirImports()">Distribute Imports</button>
+      <button style="background:#065f46" onclick="checkAllOAuth()">Test All OAuth</button>
+      <button class="terminal-btn" onclick="toggleTerminal(null)">General Terminal</button>
+      <button onclick="refresh()">Refresh</button>
     </div>
   </header>
 
@@ -348,7 +348,7 @@
 
   <!-- Auth extras -->
   <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
-    <h3 style="font-size:0.9rem;color:var(--muted);margin-bottom:12px">Validar Gmail (projeto inema-tds)</h3>
+    <h3 style="font-size:0.9rem;color:var(--muted);margin-bottom:12px">Validate Gmail (inema-tds project)</h3>
     <div style="display:flex;gap:12px;flex-wrap:wrap" id="extraAuth">
       <div class="instance" style="flex:1;min-width:200px;cursor:default;padding:12px" id="extra-card-vip"></div>
       <div class="instance" style="flex:1;min-width:200px;cursor:default;padding:12px" id="extra-card-pix"></div>
@@ -372,11 +372,11 @@
     </div>
     <div class="terminal-tabs" id="terminalTabs"></div>
     <div class="terminal-body">
-      <div class="terminal-output" id="terminalOutput">Pronto. Digite um comando abaixo.\n\nComandos permitidos: journalctl, systemctl, ps, ls, cat, head, tail, grep, wc, df, du, free, uptime, date, sqlite3, python3, pip, which, echo, find, stat</div>
+      <div class="terminal-output" id="terminalOutput">Ready. Type a command below.\n\nAllowed commands: journalctl, systemctl, ps, ls, cat, head, tail, grep, wc, df, du, free, uptime, date, sqlite3, python3, pip, which, echo, find, stat</div>
       <div class="terminal-input-row">
-        <span class="prefix" id="terminalPrefix">geral $</span>
-        <input type="text" id="terminalInput" placeholder="comando..." onkeydown="if(event.key==='Enter')execCmd()">
-        <button onclick="execCmd()">Executar</button>
+        <span class="prefix" id="terminalPrefix">general $</span>
+        <input type="text" id="terminalInput" placeholder="command..." onkeydown="if(event.key==='Enter')execCmd()">
+        <button onclick="execCmd()">Run</button>
       </div>
       <div class="quick-cmds">
         <button onclick="quickCmd('systemctl --user list-units yt-* --all')">services</button>
@@ -387,7 +387,7 @@
         <button onclick="quickCmd('uptime')">uptime</button>
         <button onclick="quickCmd('ls lives/ 2>/dev/null | wc -l')">lives count</button>
         <button onclick="quickCmd('sqlite3 data/lives.db \"SELECT COUNT(*) FROM publicados\"')">total pub</button>
-        <button onclick="quickCmd('sqlite3 data/lives.db \"SELECT clip_titulo,data_publicacao FROM publicados ORDER BY data_publicacao DESC LIMIT 5\"')">ultimos 5</button>
+        <button onclick="quickCmd('sqlite3 data/lives.db \"SELECT clip_titulo,data_publicacao FROM publicados ORDER BY data_publicacao DESC LIMIT 5\"')">last 5</button>
       </div>
     </div>
   </div>
@@ -396,7 +396,7 @@
 <script>
 let data = null;
 let countdownSec = 0;
-let currentTerminalInstance = null; // null = geral
+let currentTerminalInstance = null; // null = general
 let terminalHistory = {};
 let cmdHistory = [];
 let cmdHistoryIdx = -1;
@@ -415,7 +415,7 @@ async function refresh() {
 async function distribuirImports() {
   const btn = document.getElementById('btnDistribuir');
   btn.disabled = true;
-  btn.textContent = 'Distribuindo...';
+  btn.textContent = 'Distributing...';
   try {
     const resp = await fetch('/api/import/distribute', {
       method: 'POST',
@@ -424,20 +424,20 @@ async function distribuirImports() {
     });
     const data = await resp.json();
     if (!data.ok) {
-      alert('Erro: ' + (data.error || 'desconhecido'));
+      alert('Error: ' + (data.error || 'unknown'));
     } else if (data.total === 0) {
       alert('Nenhum MP4 encontrado em:\n' + (data.source || '/home/nmaldaner/projetos/yt-pub-lives/imports/'));
     } else {
       const linhas = (data.por_instancia || [])
         .filter(i => i.clips > 0)
-        .map(i => `  ${i.instancia}: ${i.clips} clips${i.ok ? '' : ' ⚠ sem scan'}`)
+        .map(i => `  ${i.instancia}: ${i.clips} clips${i.ok ? '' : ' ⚠ no scan'}`)
         .join('\n');
-      alert(`Distribuidos ${data.total} clips:\n${linhas}`);
+      alert(`Distributed ${data.total} clips:\n${linhas}`);
     }
   } catch(e) {
-    alert('Erro ao distribuir: ' + e.message);
+    alert('Error distributing: ' + e.message);
   }
-  btn.textContent = 'Distribuir Imports';
+  btn.textContent = 'Distribute Imports';
   btn.disabled = false;
 }
 
@@ -449,7 +449,7 @@ function render() {
   // Telegram badge
   const tb = document.getElementById('telegramBadge');
   if (data.telegram_last_alert) {
-    tb.textContent = `Telegram: alerta ${data.telegram_last_alert.split(' ')[1]}`;
+    tb.textContent = `Telegram: alert ${data.telegram_last_alert.split(' ')[1]}`;
     tb.className = 'telegram-badge on';
   } else {
     tb.textContent = 'Telegram: ok';
@@ -484,11 +484,11 @@ function render() {
     </div>
     <div class="summary-card ok">
       <div class="value">${pubHoje}<span style="font-size:0.8rem;color:var(--muted)">/${prevPubDia}</span></div>
-      <div class="label">Pub. 24h / Prev</div>
+      <div class="label">Pub. 24h / Forecast</div>
     </div>
     <div class="summary-card" style="border-color:rgba(59,130,246,0.3)">
       <div class="value" style="color:var(--blue)">${cortesHoje}<span style="font-size:0.8rem;color:var(--muted)">/${prevCorteDia}</span></div>
-      <div class="label">Cortes 24h / Prev</div>
+      <div class="label">Cuts 24h / Forecast</div>
     </div>
     <div class="summary-card">
       <div class="value">${totalPub}</div>
@@ -500,7 +500,7 @@ function render() {
     </div>
     <div class="summary-card ${erros > 0 ? 'error' : 'ok'}">
       <div class="value">${erros}</div>
-      <div class="label">Erros</div>
+      <div class="label">Errors</div>
     </div>
   `;
 
@@ -531,7 +531,7 @@ function render() {
           </h2>
           <span style="display:flex;align-items:center;gap:6px">
             ${db.canal_url ? `<a href="${db.canal_url}" target="_blank" onclick="event.stopPropagation()" style="text-decoration:none"><span style="background:#dc2626;color:#fff;font-size:0.62rem;font-weight:600;padding:1px 5px;border-radius:3px">YT</span></a>` : ''}
-            ${inst.dashboard.running ? `<a href="http://${location.hostname}:${inst.port}" target="_blank" onclick="event.stopPropagation()" style="text-decoration:none"><span style="background:var(--blue);color:#fff;font-size:0.62rem;font-weight:600;padding:1px 5px;border-radius:3px">Abrir</span></a>` : ''}
+            ${inst.dashboard.running ? `<a href="http://${location.hostname}:${inst.port}" target="_blank" onclick="event.stopPropagation()" style="text-decoration:none"><span style="background:var(--blue);color:#fff;font-size:0.62rem;font-weight:600;padding:1px 5px;border-radius:3px">Open</span></a>` : ''}
             <span class="port">:${inst.port}</span>
           </span>
         </div>
@@ -549,32 +549,32 @@ function render() {
           </div>
         </div>
 
-        <!-- Pipelines: Publicacao e Cortes lado a lado -->
+        <!-- Pipelines: Publishing and Cuts side by side -->
         <div style="display:flex;gap:8px;margin-bottom:10px">
           <div style="flex:1;background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.15);border-radius:6px;padding:8px 10px">
-            <div style="font-size:0.68rem;color:var(--green);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;font-weight:600">Publicacoes</div>
+            <div style="font-size:0.68rem;color:var(--green);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;font-weight:600">Publications</div>
             <div style="display:flex;justify-content:space-between;align-items:baseline">
               <span style="font-size:1.2rem;font-weight:700;color:${(db.publicados_hoje||0)>0?'var(--green)':'var(--muted)'}">${db.publicados_hoje || 0}</span>
               <span style="font-size:0.85rem;font-weight:700;color:var(--yellow)">${db.pub_previsao_dia || '?'}<span style="font-size:0.65rem;font-weight:400;color:var(--muted)">/dia</span></span>
             </div>
             <div style="font-size:0.72rem;margin-top:4px">
-              <span style="color:var(--muted)">Prox:</span>
+              <span style="color:var(--muted)">Next:</span>
               <span style="color:${db.pub_paused?'var(--red)':'var(--green)'};font-weight:600">${db.proximo_pub || '--'}</span>
             </div>
-            <div style="font-size:0.65rem;color:var(--muted);margin-top:2px"><span style="color:var(--text);font-weight:600">${db.pub_horarios_count || 0}</span> horarios x <span style="color:var(--text);font-weight:600">${db.pub_max_por_vez || 1}</span>/vez</div>
+            <div style="font-size:0.65rem;color:var(--muted);margin-top:2px"><span style="color:var(--text);font-weight:600">${db.pub_horarios_count || 0}</span> slots x <span style="color:var(--text);font-weight:600">${db.pub_max_por_vez || 1}</span>/run</div>
             <div style="font-size:0.65rem;color:var(--muted)">Total: <span style="color:var(--green);font-weight:600">${db.total_publicados || 0}</span></div>
           </div>
           <div style="flex:1;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.15);border-radius:6px;padding:8px 10px">
-            <div style="font-size:0.68rem;color:var(--blue);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;font-weight:600">Cortes</div>
+            <div style="font-size:0.68rem;color:var(--blue);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;font-weight:600">Cuts</div>
             <div style="display:flex;justify-content:space-between;align-items:baseline">
               <span style="font-size:1.2rem;font-weight:700;color:${(db.cortados_hoje||0)>0?'var(--blue)':'var(--muted)'}">${db.cortados_hoje || 0}</span>
               <span style="font-size:0.85rem;font-weight:700;color:var(--yellow)">${db.corte_previsao_dia || '?'}<span style="font-size:0.65rem;font-weight:400;color:var(--muted)">/dia</span></span>
             </div>
             <div style="font-size:0.72rem;margin-top:4px">
-              <span style="color:var(--muted)">Prox:</span>
-              <span style="color:${db.corte_paused||db.proximo_corte==='desligado'?'var(--red)':'var(--blue)'};font-weight:600">${db.proximo_corte || '--'}</span>
+              <span style="color:var(--muted)">Next:</span>
+              <span style="color:${db.corte_paused||db.proximo_corte==='off'?'var(--red)':'var(--blue)'};font-weight:600">${db.proximo_corte || '--'}</span>
             </div>
-            <div style="font-size:0.65rem;color:var(--muted);margin-top:2px"><span style="color:var(--text);font-weight:600">${db.corte_horarios_count || 0}</span> horarios x <span style="color:var(--text);font-weight:600">${db.corte_max_por_dia || 1}</span>/dia</div>
+            <div style="font-size:0.65rem;color:var(--muted);margin-top:2px"><span style="color:var(--text);font-weight:600">${db.corte_horarios_count || 0}</span> slots x <span style="color:var(--text);font-weight:600">${db.corte_max_por_dia || 1}</span>/day</div>
             <div style="font-size:0.65rem;color:var(--muted)">Total: <span style="color:var(--blue);font-weight:600">${db.total_cortados || 0}</span></div>
           </div>
         </div>
@@ -586,7 +586,7 @@ function render() {
               <th style="padding:2px 4px">Total</th>
               <th style="padding:2px 4px">Pend</th>
               <th style="padding:2px 4px">Pub</th>
-              <th style="padding:2px 4px">Erros</th>
+              <th style="padding:2px 4px">Errors</th>
               <th style="padding:2px 4px;color:var(--blue)">24h</th>
             </tr>
           </thead>
@@ -626,10 +626,10 @@ function render() {
           </tbody>
         </table>
 
-        <!-- Grafico pub -->
+        <!-- Publication chart -->
         ${db.pub_history ? `<div style="background:rgba(255,255,255,0.03);border-radius:6px;padding:6px 8px;margin-bottom:8px">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
-            <span style="font-size:0.62rem;color:var(--muted)">Publicacoes</span>
+            <span style="font-size:0.62rem;color:var(--muted)">Publications</span>
             <div style="display:flex;gap:2px" id="chart-tabs-${inst.id}">
               ${['1d','7d','30d','3m','6m','1a'].map(p => `<button class="sm" style="padding:1px 5px;font-size:0.58rem;background:${p==='1d'?'var(--accent)':'rgba(255,255,255,0.08)'}" onclick="event.stopPropagation();switchChart(${inst.id},'${p}')">${p}</button>`).join('')}
             </div>
@@ -642,7 +642,7 @@ function render() {
           <div class="title">${esc(ultimo.title || '--')}</div>
           <div class="time">${ultimo.at || ''} ${ultimo.video_id ? '| ' + ultimo.video_id : ''}</div>
         </div>
-        ` : '<div class="last-pub"><div class="time">Nenhuma publicacao</div></div>'}
+        ` : '<div class="last-pub"><div class="time">No publications</div></div>'}
         ${schedDetail ? `<div style="font-size:0.68rem;color:var(--muted);margin-bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(schedDetail)}">${esc(schedDetail)}</div>` : ''}
 
         <div id="oauth-${inst.id}" style="font-size:0.72rem;margin-bottom:8px;color:var(--muted)">
@@ -653,7 +653,7 @@ function render() {
         </div>
 
         <div class="actions">
-          ${!allUp ? `<button class="sm danger" onclick="resolveInstance(${inst.id})">Resolver</button>` : ''}
+          ${!allUp ? `<button class="sm danger" onclick="resolveInstance(${inst.id})">Resolve</button>` : ''}
           <button class="sm" style="background:#065f46" onclick="checkOAuth(${inst.id})">OAuth</button>
           <button class="sm log-btn" onclick="showLogs('scheduler', ${inst.id})">Logs</button>
           <button class="sm terminal-btn" onclick="toggleTerminal(${inst.id})">Terminal</button>
@@ -674,7 +674,7 @@ async function checkOAuth(id) {
   const el = document.getElementById(`oauth-${id}`);
   const modalEl = document.getElementById('modalBody')?.querySelector(`#oauth-${id}`);
   const targets = [el, modalEl].filter(Boolean);
-  targets.forEach(t => t.innerHTML = '<span style="color:var(--yellow)">Testando OAuth...</span>');
+  targets.forEach(t => t.innerHTML = '<span style="color:var(--yellow)">Testing OAuth...</span>');
   try {
     const resp = await fetch(`/api/oauth/${id}`);
     const result = await resp.json();
@@ -684,13 +684,13 @@ async function checkOAuth(id) {
       targets.forEach(t => t.innerHTML = `<span style="color:var(--red)">&#10007; ${esc(result.msg)}</span> <button class="sm" style="background:var(--orange);margin-left:6px" onclick="event.stopPropagation();startAuth(${id})">Autenticar</button>`);
     }
   } catch (e) {
-    targets.forEach(t => t.innerHTML = `<span style="color:var(--red)">Erro: ${esc(e.message)}</span>`);
+    targets.forEach(t => t.innerHTML = `<span style="color:var(--red)">Error: ${esc(e.message)}</span>`);
   }
 }
 
 async function checkExtraOAuth(email, key) {
   const el = document.getElementById(`extra-oauth-${key}`);
-  el.innerHTML = '<span style="color:var(--yellow)">Testando...</span>';
+  el.innerHTML = '<span style="color:var(--yellow)">Testing...</span>';
   try {
     const resp = await fetch(`/api/oauth/extra?email=${encodeURIComponent(email)}`);
     const result = await resp.json();
@@ -700,7 +700,7 @@ async function checkExtraOAuth(email, key) {
       el.innerHTML = `<span style="color:var(--red)">&#10007; ${esc(result.msg)}</span>`;
     }
   } catch (e) {
-    el.innerHTML = `<span style="color:var(--red)">Erro: ${esc(e.message)}</span>`;
+    el.innerHTML = `<span style="color:var(--red)">Error: ${esc(e.message)}</span>`;
   }
 }
 
@@ -722,16 +722,16 @@ async function loadExtraStatus() {
       if (lastDate) {
         const days = Math.floor((Date.now() - new Date(lastDate).getTime()) / 86400000);
         const color = days > 30 ? 'var(--red)' : days > 7 ? 'var(--yellow)' : 'var(--green)';
-        statusHtml = `<span style="color:${color};font-weight:600">Validado ${lastDate}</span>`;
-        if (days > 7) statusHtml += ` <span style="color:var(--muted)">(${days}d atras)</span>`;
+        statusHtml = `<span style="color:${color};font-weight:600">Validated ${lastDate}</span>`;
+        if (days > 7) statusHtml += ` <span style="color:var(--muted)">(${days}d ago)</span>`;
       } else {
-        statusHtml = `<span style="color:var(--red)">Nunca validado</span>`;
+        statusHtml = `<span style="color:var(--red)">Never validated</span>`;
       }
       el.innerHTML = `
         <div style="font-size:0.9rem;font-weight:600;margin-bottom:4px">${email}</div>
         <div style="font-size:0.72rem;margin-bottom:6px">${statusHtml}</div>
         <div style="display:flex;gap:6px">
-          <button class="sm" style="background:var(--orange)" onclick="startExtraAuth('${email}')">Validar Gmail</button>
+          <button class="sm" style="background:var(--orange)" onclick="startExtraAuth('${email}')">Validate Gmail</button>
         </div>`;
     });
   } catch (e) {}
@@ -744,10 +744,10 @@ async function startExtraAuth(email) {
     if (result.ok && result.url) {
       window.open(result.url, '_blank');
     } else {
-      alert(result.msg || 'Erro ao iniciar autenticacao');
+      alert(result.msg || 'Error starting authentication');
     }
   } catch (e) {
-    alert('Erro: ' + e.message);
+    alert('Error: ' + e.message);
   }
 }
 
@@ -758,10 +758,10 @@ async function startAuth(id) {
     if (result.ok && result.url) {
       window.open(result.url, '_blank');
     } else {
-      alert(result.msg || 'Erro ao iniciar autenticacao');
+      alert(result.msg || 'Error starting authentication');
     }
   } catch (e) {
-    alert('Erro: ' + e.message);
+    alert('Error: ' + e.message);
   }
 }
 
@@ -786,7 +786,7 @@ function miniChart(history) {
     return `<circle cx="${x}" cy="${yOf(c)}" r="${r}" fill="#22c55e"><title>${history[i].date.slice(5)}: ${c}</title></circle>`;
   }).join('');
 
-  // Labels: mostrar dia para 7d, dd/mm espaçado para maiores
+  // Labels: show day for 7d, dd/mm spaced for larger ranges
   let labelStep = 1;
   if (n > 60) labelStep = Math.ceil(n / 10);
   else if (n > 14) labelStep = Math.ceil(n / 7);
@@ -818,18 +818,18 @@ function switchChart(instId, period) {
   const history = inst.db.pub_history[period];
   if (!history) return;
 
-  // Atualizar chart
+  // Update chart
   const el = document.getElementById(`chart-${instId}`);
   if (el) el.innerHTML = miniChart(history);
 
-  // Atualizar tab ativa (card + modal)
+  // Update active tab (card + modal)
   document.querySelectorAll(`#chart-tabs-${instId} button, [id="chart-tabs-${instId}"] button`).forEach(btn => {
     btn.style.background = btn.textContent === period ? 'var(--accent)' : 'rgba(255,255,255,0.08)';
   });
 }
 
 function openModal(id, event) {
-  // Não abrir modal se clicou em botão ou link
+  // Do not open modal if a button or link was clicked
   if (event.target.closest('button') || event.target.closest('a')) return;
   const inst = data.instances.find(i => i.id === id);
   if (!inst) return;
@@ -849,12 +849,12 @@ document.addEventListener('keydown', e => {
 });
 
 async function resolveInstance(id) {
-  // Mostrar resultado tanto no card quanto no modal
+  // Show result in both card and modal
   const el = document.getElementById(`oauth-${id}`);
   const modalEl = document.getElementById('modalBody')?.querySelector(`#oauth-${id}`);
   const targets = [el, modalEl].filter(Boolean);
 
-  targets.forEach(t => t.innerHTML = '<span style="color:var(--yellow)">Resolvendo...</span>');
+  targets.forEach(t => t.innerHTML = '<span style="color:var(--yellow)">Resolving...</span>');
   try {
     const resp = await fetch(`/api/resolve/${id}`);
     const result = await resp.json();
@@ -863,7 +863,7 @@ async function resolveInstance(id) {
     targets.forEach(t => t.innerHTML = html);
     setTimeout(refresh, 2000);
   } catch (e) {
-    targets.forEach(t => t.innerHTML = `<span style="color:var(--red)">Erro: ${esc(e.message)}</span>`);
+    targets.forEach(t => t.innerHTML = `<span style="color:var(--red)">Error: ${esc(e.message)}</span>`);
   }
 }
 
@@ -873,7 +873,7 @@ async function checkAllOAuth() {
 }
 
 async function restartSvc(type, id) {
-  if (!confirm(`Reiniciar ${type} do lives${id}?`)) return;
+  if (!confirm(`Restart ${type} for lives${id}?`)) return;
   const resp = await fetch(`/api/restart/${type}/${id}`);
   const result = await resp.json();
   alert(result.msg);
@@ -884,16 +884,16 @@ async function showLogs(type, id) {
   const panel = document.getElementById('terminalPanel');
   panel.classList.add('open');
   const output = document.getElementById('terminalOutput');
-  output.textContent = 'Carregando logs...';
+  output.textContent = 'Loading logs...';
 
   const name = data.instances.find(i => i.id === id)?.name || `lives${id}`;
-  document.getElementById('terminalTitle').textContent = `Logs ${type} - ${name}`;
+  document.getElementById('terminalTitle').textContent = `Logs ${type} — ${name}`;
   currentTerminalInstance = id;
   updateTerminalUI();
 
   const resp = await fetch(`/api/logs/${type}/${id}?lines=100`);
   const result = await resp.json();
-  output.textContent = result.logs || 'Sem logs';
+  output.textContent = result.logs || 'No logs';
   output.scrollTop = output.scrollHeight;
 }
 
@@ -907,22 +907,22 @@ function toggleTerminal(instanceId) {
   panel.classList.add('open');
   updateTerminalUI();
 
-  const key = instanceId === null ? 'geral' : `lives${instanceId}`;
+  const key = instanceId === null ? 'general' : `lives${instanceId}`;
   const output = document.getElementById('terminalOutput');
-  output.textContent = terminalHistory[key] || `Terminal ${key}. Digite um comando abaixo.\n\nComandos permitidos: journalctl, systemctl, ps, ls, cat, head, tail, grep, wc, df, du, free, uptime, date, sqlite3, python3, pip, which, echo, find, stat`;
+  output.textContent = terminalHistory[key] || `Terminal ${key}. Type a command below.\n\nAllowed commands: journalctl, systemctl, ps, ls, cat, head, tail, grep, wc, df, du, free, uptime, date, sqlite3, python3, pip, which, echo, find, stat`;
   output.scrollTop = output.scrollHeight;
 
   setTimeout(() => document.getElementById('terminalInput').focus(), 100);
 }
 
 function updateTerminalUI() {
-  const name = currentTerminalInstance === null ? 'geral' : `lives${currentTerminalInstance}`;
+  const name = currentTerminalInstance === null ? 'general' : `lives${currentTerminalInstance}`;
   document.getElementById('terminalTitle').textContent = `Terminal - ${name}`;
   document.getElementById('terminalPrefix').textContent = `${name} $`;
 
   // Tabs
   const tabs = document.getElementById('terminalTabs');
-  let html = `<button class="terminal-tab ${currentTerminalInstance === null ? 'active' : ''}" onclick="toggleTerminal(null)">Geral</button>`;
+  let html = `<button class="terminal-tab ${currentTerminalInstance === null ? 'active' : ''}" onclick="toggleTerminal(null)">General</button>`;
   if (data && data.instances) {
     data.instances.forEach(inst => {
       html += `<button class="terminal-tab ${currentTerminalInstance === inst.id ? 'active' : ''}" onclick="toggleTerminal(${inst.id})">${inst.name}</button>`;
@@ -945,11 +945,11 @@ async function execCmd() {
   input.value = '';
 
   const output = document.getElementById('terminalOutput');
-  const key = currentTerminalInstance === null ? 'geral' : `lives${currentTerminalInstance}`;
+  const key = currentTerminalInstance === null ? 'general' : `lives${currentTerminalInstance}`;
   const prefix = `${key} $`;
 
   output.textContent += `\n${prefix} ${cmd}\n`;
-  output.textContent += '...executando...\n';
+  output.textContent += '...running...\n';
   output.scrollTop = output.scrollHeight;
 
   try {
@@ -962,10 +962,10 @@ async function execCmd() {
     // Replace "...executando..."
     const lines = output.textContent.split('\n');
     lines.pop(); // empty
-    lines.pop(); // ...executando...
+    lines.pop(); // ...running...
     output.textContent = lines.join('\n') + '\n' + result.output + '\n';
   } catch (e) {
-    output.textContent += `Erro: ${e.message}\n`;
+    output.textContent += `Error: ${e.message}\n`;
   }
 
   terminalHistory[key] = output.textContent;
@@ -977,7 +977,7 @@ function quickCmd(cmd) {
   execCmd();
 }
 
-// Navigate command history
+// Navigate command history (arrow keys)
 document.addEventListener('keydown', e => {
   const input = document.getElementById('terminalInput');
   if (document.activeElement !== input) return;
@@ -999,7 +999,7 @@ document.addEventListener('keydown', e => {
   }
 });
 
-// Auto-refresh
+// Auto-refresh countdown
 function startCountdown() {
   countdownSec = 300;
   setInterval(() => {

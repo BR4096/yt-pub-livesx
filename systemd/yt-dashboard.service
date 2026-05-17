@@ -1,8 +1,8 @@
 [Unit]
-# TEMPLATE — placeholders sao substituidos pelo scripts/setup-canal:
-#   __INSTANCE_DIR__   ex: /home/user/projetos/yt-pub-lives7
-#   __INSTANCE_NAME__  ex: yt-pub-lives7
-#   __PORT__           ex: 8097
+# TEMPLATE — placeholders are replaced by scripts/setup-canal:
+#   __INSTANCE_DIR__   e.g.: /home/user/projetos/yt-pub-lives7
+#   __INSTANCE_NAME__  e.g.: yt-pub-lives7
+#   __PORT__           e.g.: 8097
 Description=YT Pub Lives __INSTANCE_NAME__ Dashboard
 After=network.target
 

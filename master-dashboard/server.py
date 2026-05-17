@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Master Dashboard — monitora todas as 7 instâncias yt-pub-lives.
-Porta 8090. Heartbeat a cada 5 min. Alerta Telegram a cada 30 min.
+Master Dashboard — monitors all 7 yt-pub-lives instances.
+Port 8090. Heartbeat every 5 min. Telegram alert every 30 min.
 """
 
 import base64
@@ -33,7 +33,7 @@ if os.path.exists(ENV_FILE):
                 key, val = line.split('=', 1)
                 os.environ.setdefault(key, val)
 
-# Estado de validação gmail extras
+# Extra Gmail validation state
 extra_validations_file = os.path.join(DASHBOARD_DIR, 'extra_validations.json')
 def load_extra_validations():
     try:
@@ -57,7 +57,7 @@ _DASHBOARD_PASSWORD = os.environ.get('DASHBOARD_PASSWORD', 'Inema2026$$$')
 _VALID_SESSIONS = set()
 
 _LOGIN_HTML = '''<!doctype html>
-<html lang="pt-br">
+<html lang="en">
 <head><meta charset="utf-8"><title>Login — YT Pub Master</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
@@ -78,9 +78,9 @@ button:hover{background:#4f46e5}
 <body>
 <div class="card">
   <h2>YT Pub Master</h2>
-  <label>Senha</label>
+  <label>Password</label>
   <input type="password" id="pw" placeholder="••••••••" autofocus>
-  <button onclick="login()">Entrar</button>
+  <button onclick="login()">Sign in</button>
   <div class="err" id="err"></div>
 </div>
 <script>
@@ -91,13 +91,13 @@ async function login(){
     body:JSON.stringify({password:document.getElementById('pw').value})});
   const d=await r.json();
   if(d.ok)location.href='/';
-  else document.getElementById('err').textContent='Senha incorreta';
+  else document.getElementById('err').textContent='Incorrect password';
 }
 </script>
 </body></html>'''
 
-# Instâncias — carregadas de master-dashboard/instances.json
-# (gerenciado pelo scripts/setup-canal; ver instances.json.example)
+# Instances — loaded from master-dashboard/instances.json
+# (managed by scripts/setup-canal; see instances.json.example)
 INSTANCES_FILE = os.path.join(DASHBOARD_DIR, 'instances.json')
 
 def load_instances():
@@ -107,12 +107,12 @@ def load_instances():
         with open(INSTANCES_FILE) as f:
             return json.load(f)
     except Exception as e:
-        print(f'[WARN] falha ao ler {INSTANCES_FILE}: {e}', file=sys.stderr)
+        print(f'[WARN] failed to read {INSTANCES_FILE}: {e}', file=sys.stderr)
         return []
 
 INSTANCES = load_instances()
 
-# Estado global do heartbeat
+# Global heartbeat state
 heartbeat_data = {'instances': [], 'updated_at': '', 'telegram_last_alert': ''}
 heartbeat_lock = threading.Lock()
 last_telegram_alert = None
@@ -124,7 +124,7 @@ def log(msg):
 
 
 def get_service_info(svc_name):
-    """Retorna status de um serviço systemd user."""
+    """Returns the status of a systemd user service."""
     try:
         result = subprocess.run(
             ['systemctl', '--user', 'show', svc_name,
@@ -142,7 +142,7 @@ def get_service_info(svc_name):
 
 
 def get_scheduler_status(instance_path):
-    """Lê scheduler_status.json da instância."""
+    """Reads scheduler_status.json from the instance."""
     status_file = os.path.join(instance_path, 'dashboard', 'scheduler_status.json')
     try:
         with open(status_file) as f:
@@ -152,7 +152,7 @@ def get_scheduler_status(instance_path):
 
 
 def get_db_stats(instance_path):
-    """Lê estatísticas do banco SQLite da instância."""
+    """Reads SQLite database statistics from the instance."""
     db_path = os.path.join(instance_path, 'data', 'lives.db')
     if not os.path.exists(db_path):
         return None
@@ -165,16 +165,16 @@ def get_db_stats(instance_path):
         cur.execute("SELECT COUNT(*) FROM lives")
         total_lives = cur.fetchone()[0]
 
-        # Total publicados
+        # Total published
         cur.execute("SELECT COUNT(*) FROM publicados WHERE clip_video_id IS NOT NULL AND clip_video_id != '' AND clip_video_id NOT LIKE 'erro%' AND clip_video_id NOT LIKE 'moved_%' AND clip_video_id != 'publicando'")
         total_pub = cur.fetchone()[0]
 
-        # Publicados ultimas 24h (total e por tipo)
+        # Published in last 24h (total and by type)
         since_24h = (datetime.now() - timedelta(hours=24)).strftime('%Y-%m-%d %H:%M')
         cur.execute("SELECT COUNT(*) FROM publicados WHERE data_publicacao >= ? AND clip_video_id IS NOT NULL AND clip_video_id != '' AND clip_video_id NOT LIKE 'erro%' AND clip_video_id NOT LIKE 'moved_%' AND clip_video_id != 'publicando'", (since_24h,))
         pub_hoje = cur.fetchone()[0]
 
-        # Por tipo nas 24h
+        # By type in last 24h
         cur.execute("""
             SELECT p.live_video_id, l.titulo
             FROM publicados p LEFT JOIN lives l ON p.live_video_id = l.video_id
@@ -196,16 +196,16 @@ def get_db_stats(instance_path):
             else:
                 clips_24h += 1
 
-        # Último publicado
+        # Last published
         cur.execute("SELECT clip_titulo, data_publicacao, clip_video_id FROM publicados WHERE clip_video_id IS NOT NULL AND clip_video_id != '' AND clip_video_id NOT LIKE 'erro%' AND clip_video_id NOT LIKE 'moved_%' AND clip_video_id != 'publicando' ORDER BY data_publicacao DESC LIMIT 1")
         row = cur.fetchone()
         ultimo = {'title': row[0], 'at': row[1], 'video_id': row[2]} if row else None
 
-        # Erros
+        # Errors
         cur.execute("SELECT COUNT(*) FROM publicados WHERE clip_video_id LIKE 'erro%'")
         erros = cur.fetchone()[0]
 
-        # Canal URL
+        # Channel URL
         cur.execute("SELECT valor FROM config WHERE chave='canal_destino_url'")
         row = cur.fetchone()
         canal_url = row[0] if row else ''
@@ -219,7 +219,7 @@ def get_db_stats(instance_path):
         row = cur.fetchone()
         canal_nome = row[0] if row else ''
 
-        # Lives por status
+        # Lives by status
         cur.execute("SELECT COUNT(*) FROM lives WHERE status_cortes='pendente'")
         lives_pendentes = cur.fetchone()[0]
 
@@ -229,7 +229,7 @@ def get_db_stats(instance_path):
         cur.execute("SELECT COUNT(*) FROM lives WHERE status_cortes='erro'")
         lives_erro = cur.fetchone()[0]
 
-        # Clips stats (exclui imports — imports tem contagem propria)
+        # Clips stats (excludes imports — imports have their own count)
         cur.execute("SELECT COALESCE(SUM(CAST(qtd_clips AS INTEGER)),0) FROM lives WHERE video_id NOT LIKE 'import_%'")
         total_clips = cur.fetchone()[0]
 
@@ -272,20 +272,20 @@ def get_db_stats(instance_path):
         imports_clips_total = cur.fetchone()[0]
         imports_pend = max(0, imports_clips_total - imports_pub - imports_erro)
 
-        # Cortados ultimas 24h
+        # Cut in last 24h
         cur.execute("SELECT COUNT(*) FROM lives WHERE data_corte >= ?", (since_24h,))
         cortados_hoje = cur.fetchone()[0]
 
-        # Total cortados e pendentes
+        # Total cut and pending
         cur.execute("SELECT COUNT(*) FROM lives WHERE status_cortes='concluido'")
         total_cortados = cur.fetchone()[0]
 
         cur.execute("SELECT COUNT(*) FROM lives WHERE status_cortes='pendente'")
         pendentes_corte = cur.fetchone()[0]
 
-        # Historico publicacoes (varios periodos)
+        # Publication history (various periods)
         pub_history = {}
-        # 1d = ultimas 24 horas, por hora
+        # 1d = last 24 hours, by hour
         now = datetime.now()
         hist_1d = []
         for i in range(23, -1, -1):
@@ -304,7 +304,7 @@ def get_db_stats(instance_path):
                 hist.append({'date': d, 'count': cur.fetchone()[0]})
             pub_history[period] = hist
 
-        # Config de agendamento
+        # Scheduling config
         config = {}
         cur.execute("SELECT chave, valor FROM config WHERE chave IN ('pub_horarios','corte_horarios','pub_max_por_vez','corte_max_por_dia','pipeline_cortes_paused','pipeline_pub_paused','corte_auto')")
         for row in cur.fetchall():
@@ -318,7 +318,7 @@ def get_db_stats(instance_path):
         pub_paused = config.get('pipeline_pub_paused', 'false') == 'true'
         corte_auto = config.get('corte_auto', 'false') == 'true'
 
-        # Calcular próximo horário
+        # Calculate next scheduled time
         now = datetime.now()
         now_hm = now.strftime('%H:%M')
 
@@ -329,9 +329,9 @@ def get_db_stats(instance_path):
             for t in times:
                 if t > now_hm:
                     return t
-            return times[0] + ' (amanha)' if times else None
+            return times[0] + ' (tomorrow)' if times else None
 
-        # Previsão publicações por dia
+        # Forecast publications per day
         pub_list = [h.strip() for h in pub_horarios.split(',') if h.strip()]
         pub_previsao_dia = len(pub_list) * int(pub_max)
         corte_list = [h.strip() for h in corte_horarios.split(',') if h.strip()]
@@ -375,8 +375,8 @@ def get_db_stats(instance_path):
             'tiktok_pub': tiktok_pub,
             'tiktok_pend': tiktok_pend,
             'tiktok_erro': tiktok_erro,
-            'proximo_pub': next_time(pub_horarios) if not pub_paused else 'pausado',
-            'proximo_corte': next_time(corte_horarios) if corte_auto and not corte_paused else ('pausado' if corte_paused else 'desligado'),
+            'proximo_pub': next_time(pub_horarios) if not pub_paused else 'paused',
+            'proximo_corte': next_time(corte_horarios) if corte_auto and not corte_paused else ('paused' if corte_paused else 'off'),
             'pub_previsao_dia': pub_previsao_dia,
             'corte_previsao_dia': len(corte_list) * int(corte_max),
             'pub_max_por_vez': pub_max,
@@ -391,22 +391,22 @@ def get_db_stats(instance_path):
 
 
 def check_oauth(instance_path):
-    """Testa se o OAuth do Google está funcional para a instância."""
+    """Tests whether Google OAuth is functional for the instance."""
     config_dir = os.path.join(instance_path, 'config')
     env_file = os.path.join(config_dir, '.env')
     enc_key_file = os.path.join(config_dir, '.encryption_key')
     creds_file = os.path.join(config_dir, 'credentials.enc')
 
-    # Verificar arquivos necessários
+    # Check required files
     if not os.path.exists(env_file):
-        return {'ok': False, 'status': 'no_env', 'msg': '.env ausente'}
+        return {'ok': False, 'status': 'no_env', 'msg': '.env missing'}
     if not os.path.exists(enc_key_file):
-        return {'ok': False, 'status': 'no_key', 'msg': '.encryption_key ausente'}
+        return {'ok': False, 'status': 'no_key', 'msg': '.encryption_key missing'}
     if not os.path.exists(creds_file):
-        return {'ok': False, 'status': 'no_creds', 'msg': 'credentials.enc ausente'}
+        return {'ok': False, 'status': 'no_creds', 'msg': 'credentials.enc missing'}
 
     try:
-        # Carregar env da instância
+        # Load instance env
         env = {}
         with open(env_file) as f:
             for line in f:
@@ -416,9 +416,9 @@ def check_oauth(instance_path):
                     env[k] = v
 
         if 'CLIENT_ID' not in env or 'CLIENT_SECRET' not in env:
-            return {'ok': False, 'status': 'no_client', 'msg': 'CLIENT_ID/SECRET ausente no .env'}
+            return {'ok': False, 'status': 'no_client', 'msg': 'CLIENT_ID/SECRET missing from .env'}
 
-        # Descriptografar credenciais
+        # Decrypt credentials
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
         import base64
 
@@ -431,9 +431,9 @@ def check_oauth(instance_path):
         creds = json.loads(aesgcm.decrypt(enc_data[:12], enc_data[12:], None))
 
         if 'refresh_token' not in creds:
-            return {'ok': False, 'status': 'no_refresh', 'msg': 'refresh_token ausente'}
+            return {'ok': False, 'status': 'no_refresh', 'msg': 'refresh_token missing'}
 
-        # Tentar obter access token
+        # Try to obtain access token
         token_data = urllib.parse.urlencode({
             'client_id': env['CLIENT_ID'],
             'client_secret': env['CLIENT_SECRET'],
@@ -445,7 +445,7 @@ def check_oauth(instance_path):
         resp = json.loads(urllib.request.urlopen(req, timeout=10).read())
 
         if 'access_token' in resp:
-            # Testar YouTube API com o token
+            # Test YouTube API with the token
             api_key = env.get('API_KEY', '')
             channel_id = env.get('YOUTUBE_CHANNEL_ID', '')
             test_url = f'https://www.googleapis.com/youtube/v3/channels?part=snippet&id={channel_id}&key={api_key}'
@@ -457,9 +457,9 @@ def check_oauth(instance_path):
             if test_resp.get('items'):
                 channel_name = test_resp['items'][0]['snippet']['title']
 
-            return {'ok': True, 'status': 'ok', 'msg': f'OAuth OK | Canal: {channel_name}', 'channel': channel_name}
+            return {'ok': True, 'status': 'ok', 'msg': f'OAuth OK | Channel: {channel_name}', 'channel': channel_name}
         else:
-            return {'ok': False, 'status': 'token_fail', 'msg': 'Token refresh falhou'}
+            return {'ok': False, 'status': 'token_fail', 'msg': 'Token refresh failed'}
 
     except urllib.error.HTTPError as e:
         body = e.read().decode()[:200]
@@ -469,12 +469,12 @@ def check_oauth(instance_path):
 
 
 def calc_uptime(timestamp_str):
-    """Calcula uptime a partir do ActiveEnterTimestamp do systemd."""
+    """Calculates uptime from the systemd ActiveEnterTimestamp."""
     if not timestamp_str:
         return None
     try:
-        # formato: "Wed 2026-04-01 03:03:13 -03"
-        # remover dia da semana e timezone
+        # format: "Wed 2026-04-01 03:03:13 -03"
+        # remove day of week and timezone
         parts = timestamp_str.strip().split()
         if len(parts) >= 4:
             dt_str = f"{parts[1]} {parts[2]}"
@@ -495,14 +495,14 @@ def calc_uptime(timestamp_str):
 
 
 def check_oauth_quick(instance_path):
-    """Verifica OAuth de forma rapida (só testa refresh token, sem chamar YouTube API)."""
+    """Checks OAuth quickly (only tests refresh token, without calling YouTube API)."""
     config_dir = os.path.join(instance_path, 'config')
     env_file_path = os.path.join(config_dir, '.env')
     enc_key_file = os.path.join(config_dir, '.encryption_key')
     creds_file = os.path.join(config_dir, 'credentials.enc')
 
     if not os.path.exists(env_file_path) or not os.path.exists(enc_key_file) or not os.path.exists(creds_file):
-        return {'ok': False, 'msg': 'config incompleto'}
+        return {'ok': False, 'msg': 'incomplete config'}
 
     try:
         env = {}
@@ -533,7 +533,7 @@ def check_oauth_quick(instance_path):
         resp = json.loads(urllib.request.urlopen(req, timeout=10).read())
         if 'access_token' in resp:
             return {'ok': True, 'msg': 'OK'}
-        return {'ok': False, 'msg': 'token refresh falhou'}
+        return {'ok': False, 'msg': 'token refresh failed'}
     except urllib.error.HTTPError as e:
         body = e.read().decode()[:100]
         return {'ok': False, 'msg': f'HTTP {e.code}: {body}'}
@@ -542,7 +542,7 @@ def check_oauth_quick(instance_path):
 
 
 def check_instance(inst):
-    """Coleta todos os dados de uma instância."""
+    """Collects all data for an instance."""
     sched_info = get_service_info(inst['scheduler_svc'])
     dash_info = get_service_info(inst['dashboard_svc'])
     sched_status = get_scheduler_status(inst['path'])
@@ -552,7 +552,7 @@ def check_instance(inst):
     sched_running = sched_info.get('SubState') == 'running'
     dash_running = dash_info.get('SubState') == 'running'
 
-    # Ler email do .env
+    # Read email from .env
     google_email = ''
     env_path = os.path.join(inst['path'], 'config', '.env')
     if os.path.exists(env_path):
@@ -591,7 +591,7 @@ def check_instance(inst):
 
 
 def check_all():
-    """Verifica todas as instâncias."""
+    """Checks all instances."""
     results = []
     for inst in INSTANCES:
         results.append(check_instance(inst))
@@ -599,9 +599,9 @@ def check_all():
 
 
 def send_telegram(message):
-    """Envia mensagem via Telegram Bot API."""
+    """Sends a message via the Telegram Bot API."""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        log('Telegram nao configurado (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID)')
+        log('Telegram not configured (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID)')
         return False
     try:
         data = urllib.parse.urlencode({
@@ -620,7 +620,7 @@ def send_telegram(message):
 
 
 def heartbeat_loop():
-    """Loop de heartbeat: checa a cada 5 min, alerta Telegram a cada 30 min."""
+    """Heartbeat loop: checks every 5 min, Telegram alert every 30 min."""
     global heartbeat_data, last_telegram_alert
 
     while True:
@@ -632,7 +632,7 @@ def heartbeat_loop():
                 heartbeat_data['instances'] = instances
                 heartbeat_data['updated_at'] = now.strftime('%Y-%m-%d %H:%M:%S')
 
-            # Verificar se algo está down
+            # Check if anything is down
             down = []
             for inst in instances:
                 if not inst['scheduler']['running']:
@@ -640,9 +640,9 @@ def heartbeat_loop():
                 if not inst['dashboard']['running']:
                     down.append(f"  - {inst['name']}: dashboard {inst['dashboard']['substate']}")
                 if inst.get('oauth') and not inst['oauth'].get('ok'):
-                    down.append(f"  - {inst['name']}: OAuth EXPIRADO")
+                    down.append(f"  - {inst['name']}: OAuth EXPIRED")
 
-            # Alerta Telegram a cada 30 minutos se algo estiver down
+            # Telegram alert every 30 minutes if something is down
             if down:
                 should_alert = (
                     last_telegram_alert is None or
@@ -650,24 +650,24 @@ def heartbeat_loop():
                 )
                 if should_alert:
                     msg = f"⚠️ <b>YT-Pub Monitor</b>\n\n"
-                    msg += f"Serviços com problema ({now.strftime('%H:%M')}):\n"
+                    msg += f"Services with issues ({now.strftime('%H:%M')}):\n"
                     msg += "\n".join(down)
-                    msg += f"\n\nTotal: {len(down)} serviço(s) down"
+                    msg += f"\n\nTotal: {len(down)} service(s) down"
                     send_telegram(msg)
                     last_telegram_alert = now
                     with heartbeat_lock:
                         heartbeat_data['telegram_last_alert'] = now.strftime('%Y-%m-%d %H:%M:%S')
             else:
-                # Tudo OK — se havia alerta anterior, notifica recuperação
+                # All OK — if there was a previous alert, notify recovery
                 if last_telegram_alert is not None:
-                    msg = f"✅ <b>YT-Pub Monitor</b>\n\nTodos os 7 serviços estão rodando ({now.strftime('%H:%M')})"
+                    msg = f"✅ <b>YT-Pub Monitor</b>\n\nAll 7 services are running ({now.strftime('%H:%M')})"
                     send_telegram(msg)
                     last_telegram_alert = None
 
         except Exception as e:
             log(f'Heartbeat error: {e}')
 
-        time.sleep(300)  # 5 minutos
+        time.sleep(300)  # 5 minutes
 
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
@@ -727,10 +727,10 @@ class Handler(SimpleHTTPRequestHandler):
         current = data.get('current', '')
         new_pw = data.get('new', '').strip()
         if current != _DASHBOARD_PASSWORD:
-            self._send_json(403, {'error': 'senha atual incorreta'})
+            self._send_json(403, {'error': 'current password is incorrect'})
             return
         if not new_pw:
-            self._send_json(400, {'error': 'nova senha nao pode ser vazia'})
+            self._send_json(400, {'error': 'new password cannot be empty'})
             return
         if os.path.exists(ENV_FILE):
             with open(ENV_FILE) as f:
@@ -790,10 +790,10 @@ class Handler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data.encode())
         elif self.path.startswith('/api/restart/'):
-            # /api/restart/scheduler/3 ou /api/restart/dashboard/5
+            # /api/restart/scheduler/3 or /api/restart/dashboard/5
             parts = self.path.split('/')
             if len(parts) == 5:
-                svc_type = parts[3]  # scheduler ou dashboard
+                svc_type = parts[3]  # scheduler or dashboard
                 try:
                     inst_id = int(parts[4])
                 except ValueError:
@@ -803,7 +803,7 @@ class Handler(SimpleHTTPRequestHandler):
                 if inst:
                     svc_key = 'scheduler_svc' if svc_type == 'scheduler' else 'dashboard_svc'
                     svc_name = inst[svc_key]
-                    # Tentar remover lock stale antes de reiniciar scheduler
+                    # Try to remove stale lock before restarting scheduler
                     if svc_type == 'scheduler':
                         lock_path = os.path.join(inst['path'], '.scheduler.lock')
                         try:
@@ -841,10 +841,10 @@ class Handler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps(result, ensure_ascii=False).encode())
         elif self.path.startswith('/api/oauth/extra'):
-            # /api/oauth/extra?email=xxx — testa OAuth para conta extra
+            # /api/oauth/extra?email=xxx — tests OAuth for extra account
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             email = qs.get('email', [''])[0]
-            # Usa lives1 config
+            # Uses lives1 config
             result = check_oauth(INSTANCES[0]['path'])
             # Ajustar msg para indicar qual email
             if result.get('ok'):
@@ -855,10 +855,10 @@ class Handler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps(result, ensure_ascii=False).encode())
         elif self.path.startswith('/api/auth/extra'):
-            # /api/auth/extra?email=xxx — abre OAuth com login_hint para qualquer email
+            # /api/auth/extra?email=xxx — opens OAuth with login_hint for any email
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             email = qs.get('email', [''])[0]
-            # Usa CLIENT_ID do lives1 como padrão
+            # Uses CLIENT_ID from lives1 as default
             inst = INSTANCES[0]
             config_dir = os.path.join(inst['path'], 'config')
             env = {}
@@ -872,7 +872,7 @@ class Handler(SimpleHTTPRequestHandler):
                             env[k] = v
             client_id = env.get('CLIENT_ID', '')
             if not client_id:
-                result = {'ok': False, 'msg': 'CLIENT_ID ausente'}
+                result = {'ok': False, 'msg': 'CLIENT_ID missing'}
             else:
                 redirect_uri = 'http://localhost:8090/api/auth/callback'
                 scopes = 'https://www.googleapis.com/auth/youtube https://www.googleapis.com/auth/youtube.upload'
@@ -897,7 +897,7 @@ class Handler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps(result, ensure_ascii=False).encode())
         elif self.path.startswith('/api/auth/start/'):
-            # /api/auth/start/3 — gera URL OAuth para a instância
+            # /api/auth/start/3 — generates OAuth URL for the instance
             try:
                 inst_id = int(self.path.split('/')[-1])
             except ValueError:
@@ -920,11 +920,11 @@ class Handler(SimpleHTTPRequestHandler):
 
                 client_id = env.get('CLIENT_ID', '')
                 if not client_id:
-                    result = {'ok': False, 'msg': 'CLIENT_ID ausente no .env'}
+                    result = {'ok': False, 'msg': 'CLIENT_ID missing from .env'}
                 else:
                     redirect_uri = 'http://localhost:8090/api/auth/callback'
                     scopes = 'https://www.googleapis.com/auth/youtube https://www.googleapis.com/auth/youtube.upload'
-                    # Ler email do .env para login_hint
+                    # Read email from .env para login_hint
                     login_hint = env.get('GOOGLE_EMAIL', '')
                     auth_params = {
                         'client_id': client_id,
@@ -947,7 +947,7 @@ class Handler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps(result, ensure_ascii=False).encode())
         elif self.path.startswith('/api/auth/callback'):
-            # OAuth callback — troca code por tokens e salva
+            # OAuth callback — exchanges code for tokens and saves
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             code = qs.get('code', [None])[0]
             state = qs.get('state', [None])[0]
@@ -957,12 +957,12 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header('Content-Type', 'text/html; charset=utf-8')
                 self.end_headers()
-                self.wfile.write(f'<h1>Erro: {error or "sem code"}</h1><p><a href="/">Voltar</a></p>'.encode())
+                self.wfile.write(f'<h1>Error: {error or "no code"}</h1><p><a href="/">Back</a></p>'.encode())
                 return
 
-            # Auth extra — só confirma que deu certo, sem salvar em instancia
+            # Extra auth — only confirms success, without saving to instance
             if state == 'extra':
-                # Usar lives1 para trocar o code (mesmo CLIENT_ID)
+                # Use lives1 to exchange the code (same CLIENT_ID)
                 inst = INSTANCES[0]
                 config_dir = os.path.join(inst['path'], 'config')
                 env = {}
@@ -983,22 +983,22 @@ class Handler(SimpleHTTPRequestHandler):
                     req = urllib.request.Request('https://oauth2.googleapis.com/token', data=token_data)
                     resp = json.loads(urllib.request.urlopen(req, timeout=10).read())
                     if 'access_token' in resp:
-                        # Pegar email do usuario
+                        # Get user email
                         try:
                             ureq = urllib.request.Request('https://www.googleapis.com/oauth2/v1/userinfo')
                             ureq.add_header('Authorization', f'Bearer {resp["access_token"]}')
                             uinfo = json.loads(urllib.request.urlopen(ureq, timeout=10).read())
-                            validated_email = uinfo.get('email', 'desconhecido')
+                            validated_email = uinfo.get('email', 'unknown')
                         except Exception:
-                            validated_email = 'desconhecido'
+                            validated_email = 'unknown'
                         save_extra_validation(validated_email)
-                        msg = f'Gmail validado: {validated_email}'
+                        msg = f'Gmail validated: {validated_email}'
                         color = '#22c55e'
                     else:
-                        msg = 'Token obtido mas sem access_token'
+                        msg = 'Token obtained but no access_token'
                         color = '#eab308'
                 except Exception as e:
-                    msg = f'Erro: {str(e)[:200]}'
+                    msg = f'Error: {str(e)[:200]}'
                     color = '#ef4444'
 
                 self.send_response(200)
@@ -1007,7 +1007,7 @@ class Handler(SimpleHTTPRequestHandler):
                 html = f'''<html><body style="background:#0f1117;color:#e4e4e7;font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh">
                 <div style="text-align:center">
                 <h1 style="color:{color}">{msg}</h1>
-                <p><a href="/" style="color:#6366f1">Voltar ao dashboard</a></p>
+                <p><a href="/" style="color:#6366f1">Back to dashboard</a></p>
                 </div></body></html>'''
                 self.wfile.write(html.encode())
                 return
@@ -1018,7 +1018,7 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header('Content-Type', 'text/html; charset=utf-8')
                 self.end_headers()
-                self.wfile.write(b'<h1>Instancia nao encontrada</h1>')
+                self.wfile.write(b'<h1>Instance not found</h1>')
                 return
 
             config_dir = os.path.join(inst['path'], 'config')
@@ -1045,7 +1045,7 @@ class Handler(SimpleHTTPRequestHandler):
                 resp = json.loads(urllib.request.urlopen(req, timeout=10).read())
 
                 if 'refresh_token' not in resp:
-                    raise Exception('Resposta sem refresh_token')
+                    raise Exception('Response missing refresh_token')
 
                 # Encrypt and save
                 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -1071,16 +1071,16 @@ class Handler(SimpleHTTPRequestHandler):
                     f.write(encrypted)
                 os.chmod(creds_path, 0o600)
 
-                log(f'OAuth renovado para {inst["name"]}')
+                log(f'OAuth renewed for {inst["name"]}')
 
                 self.send_response(200)
                 self.send_header('Content-Type', 'text/html; charset=utf-8')
                 self.end_headers()
                 html = f'''<html><body style="background:#0f1117;color:#e4e4e7;font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh">
                 <div style="text-align:center">
-                <h1 style="color:#22c55e">Autenticacao concluida!</h1>
-                <p>{inst["name"]} — OAuth renovado com sucesso</p>
-                <p><a href="/" style="color:#6366f1">Voltar ao dashboard</a></p>
+                <h1 style="color:#22c55e">Authentication complete!</h1>
+                <p>{inst["name"]} — OAuth renewed successfully</p>
+                <p><a href="/" style="color:#6366f1">Back to dashboard</a></p>
                 </div></body></html>'''
                 self.wfile.write(html.encode())
 
@@ -1091,13 +1091,13 @@ class Handler(SimpleHTTPRequestHandler):
                 self.end_headers()
                 html = f'''<html><body style="background:#0f1117;color:#e4e4e7;font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh">
                 <div style="text-align:center">
-                <h1 style="color:#ef4444">Erro na autenticacao</h1>
+                <h1 style="color:#ef4444">Authentication error</h1>
                 <p>{str(e)[:300]}</p>
-                <p><a href="/" style="color:#6366f1">Voltar ao dashboard</a></p>
+                <p><a href="/" style="color:#6366f1">Back to dashboard</a></p>
                 </div></body></html>'''
                 self.wfile.write(html.encode())
         elif self.path.startswith('/api/resolve/'):
-            # /api/resolve/3 — auto-fix: remove stale lock + restart scheduler + restart dashboard
+            # /api/resolve/3 — auto-fix: removes stale lock + restarts scheduler + restarts dashboard
             try:
                 inst_id = int(self.path.split('/')[-1])
             except ValueError:
@@ -1116,14 +1116,14 @@ class Handler(SimpleHTTPRequestHandler):
                             old_pid = int(f.read().strip())
                         try:
                             os.kill(old_pid, 0)
-                            actions.append(f'Lock ativo (PID {old_pid} vivo)')
+                            actions.append(f'Active lock (PID {old_pid} alive)')
                         except (ProcessLookupError, OSError):
                             os.remove(lock_path)
-                            actions.append('Lock stale removido')
+                            actions.append('Stale lock removed')
                 except Exception:
                     pass
 
-                # 2. Verificar porta ocupada por outro processo
+                # 2. Check if port is occupied by another process
                 try:
                     port = inst['port']
                     ss_result = subprocess.run(
@@ -1133,12 +1133,12 @@ class Handler(SimpleHTTPRequestHandler):
                         if f':{port}' in line and 'pid=' in line:
                             pid_str = line.split('pid=')[1].split(',')[0]
                             pid = int(pid_str)
-                            # Verificar se é de outra instância
+                            # Check if it belongs to another instance
                             try:
                                 cmdline = open(f'/proc/{pid}/cmdline').read()
                                 if inst['path'] not in cmdline:
                                     os.kill(pid, 9)
-                                    actions.append(f'Porta {port} liberada (PID {pid} de outra instancia)')
+                                    actions.append(f'Port {port} freed (PID {pid} from another instance)')
                             except Exception:
                                 pass
                 except Exception:
@@ -1147,24 +1147,24 @@ class Handler(SimpleHTTPRequestHandler):
                 # 3. Restart scheduler
                 try:
                     subprocess.run(['systemctl', '--user', 'restart', inst['scheduler_svc']], capture_output=True, timeout=10)
-                    actions.append(f"Scheduler {inst['scheduler_svc']} reiniciado")
+                    actions.append(f"Scheduler {inst['scheduler_svc']} restarted")
                 except Exception as e:
-                    actions.append(f'Erro restart scheduler: {e}')
+                    actions.append(f'Error restarting scheduler: {e}')
 
                 # 3. Restart dashboard
                 try:
                     subprocess.run(['systemctl', '--user', 'restart', inst['dashboard_svc']], capture_output=True, timeout=10)
-                    actions.append(f"Dashboard {inst['dashboard_svc']} reiniciado")
+                    actions.append(f"Dashboard {inst['dashboard_svc']} restarted")
                 except Exception as e:
-                    actions.append(f'Erro restart dashboard: {e}')
+                    actions.append(f'Error restarting dashboard: {e}')
 
-                # 4. Verificar status
+                # 4. Check status
                 time.sleep(1)
                 sched_info = get_service_info(inst['scheduler_svc'])
                 dash_info = get_service_info(inst['dashboard_svc'])
                 sched_ok = sched_info.get('SubState') == 'running'
                 dash_ok = dash_info.get('SubState') == 'running'
-                actions.append(f"Status: scheduler={'OK' if sched_ok else 'FALHOU'}, dashboard={'OK' if dash_ok else 'FALHOU'}")
+                actions.append(f"Status: scheduler={'OK' if sched_ok else 'FAILED'}, dashboard={'OK' if dash_ok else 'FAILED'}")
 
                 result = {'ok': sched_ok and dash_ok, 'msg': '\n'.join(actions)}
             self.send_response(200)
@@ -1173,7 +1173,7 @@ class Handler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps(result, ensure_ascii=False).encode())
         elif self.path.startswith('/api/oauth/'):
-            # /api/oauth/3 — testa OAuth de uma instância
+            # /api/oauth/3 — tests OAuth for an instance
             try:
                 inst_id = int(self.path.split('/')[-1])
             except ValueError:
@@ -1259,11 +1259,11 @@ class Handler(SimpleHTTPRequestHandler):
             code = body.get('code', '').strip()
 
             if not inst_id or not code:
-                result = {'ok': False, 'msg': 'instance e code obrigatorios'}
+                result = {'ok': False, 'msg': 'instance and code are required'}
             else:
                 inst = next((i for i in INSTANCES if i['id'] == inst_id), None)
                 if not inst:
-                    result = {'ok': False, 'msg': 'Instancia nao encontrada'}
+                    result = {'ok': False, 'msg': 'Instance not found'}
                 else:
                     config_dir = os.path.join(inst['path'], 'config')
                     env = {}
@@ -1285,7 +1285,7 @@ class Handler(SimpleHTTPRequestHandler):
                         resp = json.loads(urllib.request.urlopen(req, timeout=10).read())
 
                         if 'refresh_token' not in resp:
-                            raise Exception('Resposta sem refresh_token')
+                            raise Exception('Response missing refresh_token')
 
                         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
                         import secrets as sec
@@ -1310,11 +1310,11 @@ class Handler(SimpleHTTPRequestHandler):
                             f.write(encrypted)
                         os.chmod(creds_path, 0o600)
 
-                        log(f'OAuth renovado para {inst["name"]}')
-                        result = {'ok': True, 'msg': f'OAuth renovado para {inst["name"]}!'}
+                        log(f'OAuth renewed for {inst["name"]}')
+                        result = {'ok': True, 'msg': f'OAuth renewed for {inst["name"]}!'}
                     except urllib.error.HTTPError as e:
                         err = e.read().decode()[:200]
-                        result = {'ok': False, 'msg': f'Erro: {err}'}
+                        result = {'ok': False, 'msg': f'Error: {err}'}
                     except Exception as e:
                         result = {'ok': False, 'msg': str(e)[:200]}
 
@@ -1343,10 +1343,10 @@ class Handler(SimpleHTTPRequestHandler):
         elif self.path == '/api/exec':
             content_len = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(content_len)) if content_len else {}
-            inst_id = body.get('instance')  # None = geral
+            inst_id = body.get('instance')  # None = general
             cmd = body.get('cmd', '').strip()
 
-            # Whitelist de comandos seguros
+            # Safe command whitelist
             ALLOWED = [
                 'journalctl', 'systemctl', 'ps', 'ls', 'cat', 'head', 'tail',
                 'grep', 'wc', 'df', 'du', 'free', 'uptime', 'date', 'sqlite3',
@@ -1354,7 +1354,7 @@ class Handler(SimpleHTTPRequestHandler):
             ]
             first_word = cmd.split()[0] if cmd else ''
             if not first_word or first_word not in ALLOWED:
-                result = {'ok': False, 'output': f'Comando nao permitido: {first_word}\nPermitidos: {", ".join(ALLOWED)}'}
+                result = {'ok': False, 'output': f'Command not allowed: {first_word}\nAllowed: {", ".join(ALLOWED)}'}
             else:
                 cwd = None
                 if inst_id is not None:
@@ -1370,7 +1370,7 @@ class Handler(SimpleHTTPRequestHandler):
                     output = proc.stdout
                     if proc.stderr:
                         output += '\n' + proc.stderr if output else proc.stderr
-                    result = {'ok': proc.returncode == 0, 'output': output or '(sem output)'}
+                    result = {'ok': proc.returncode == 0, 'output': output or '(no output)'}
                 except subprocess.TimeoutExpired:
                     result = {'ok': False, 'output': 'Timeout (30s)'}
                 except Exception as e:
@@ -1385,11 +1385,11 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_error(404)
 
     def log_message(self, format, *args):
-        pass  # silenciar logs HTTP
+        pass  # silence HTTP logs
 
 
 def main():
-    # Primeira verificação imediata
+    # Initial immediate check
     log('Master Dashboard starting...')
     instances = check_all()
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -1400,11 +1400,11 @@ def main():
     running = sum(1 for i in instances if i['scheduler']['running'])
     log(f'Initial check: {running}/7 schedulers running')
 
-    # Thread de heartbeat
+    # Heartbeat thread
     t = threading.Thread(target=heartbeat_loop, daemon=True)
     t.start()
 
-    # HTTP server
+    # Start HTTP server
     server = ThreadedHTTPServer(('0.0.0.0', PORT), Handler)
     log(f'Master Dashboard on port {PORT}')
     server.serve_forever()

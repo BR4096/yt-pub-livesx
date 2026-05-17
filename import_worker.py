@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-import_worker.py — Importa clips de pastas externas para o pipeline de publicacao.
+import_worker.py — Imports clips from external folders into the publishing pipeline.
 
-Monitora a pasta `imports/` na raiz do projeto.
-Cada subfolder = um lote de clips. Quando detectado:
-  1. Cria entrada "virtual" no banco (status_cortes=concluido)
-  2. Move os MP4s para lives/<video_id>/clips/
-  3. Gera clips_manifest.json
-  4. Remove a subfolder de imports/
+Monitors the `imports/` folder at the project root.
+Each subfolder = a batch of clips. When detected:
+  1. Creates a "virtual" entry in the database (status_cortes=concluido)
+  2. Moves MP4s to lives/<video_id>/clips/
+  3. Generates clips_manifest.json
+  4. Removes the subfolder from imports/
 
-Configuracoes relevantes no banco (config):
-  import_gerar_descricao  true|false  — usar IA para gerar descricao quando ausente
-  import_auto             true|false  — ativar verificacao horaria pelo scheduler
+Relevant settings in the database (config):
+  import_gerar_descricao  true|false  — use AI to generate description when absent
+  import_auto             true|false  — enable hourly check by the scheduler
 """
 
 import os
@@ -44,41 +44,41 @@ def log(msg):
 # ---------------------------------------------------------------------------
 
 def _sanitize(name):
-    """Converte nome de pasta para video_id seguro."""
+    """Converts folder name to a safe video_id."""
     s = re.sub(r'[^a-zA-Z0-9_-]', '_', name)
     return s[:40].strip('_') or 'import'
 
 
 def _title_from_filename(filename):
     """
-    Extrai titulo legivel do nome do arquivo.
-    Exemplos:
+    Extracts a readable title from the filename.
+    Examples:
       clip_01_Como usar n8n.mp4        -> Como usar n8n
       03_Tutorial basico.mp4           -> Tutorial basico
       c0002-pascoa2026_quick_01.mp4    -> Pascoa2026 Quick 01
     """
     name = os.path.splitext(filename)[0]
-    # Se tem __ (separador de prefixo), pega so a parte depois
+    # If it has __ (prefix separator), take only the part after it
     if '__' in name:
         name = name.split('__', 1)[1]
-    # Remove prefixo tipo clip_01_, 03_, c0002-, etc.
+    # Remove prefixes like clip_01_, 03_, c0002-, etc.
     name = re.sub(r'^clip_\d+_', '', name)
     name = re.sub(r'^\d+[_\-\s]+', '', name)
     name = re.sub(r'^[a-z]\d+[_\-]', '', name)  # c0002- style
-    # Remove sufixos de data/hora (ex: _20260404_095306)
+    # Remove date/time suffixes (e.g.: _20260404_095306)
     name = re.sub(r'_\d{8}_\d{6}$', '', name)
     name = re.sub(r'_\d{8}$', '', name)
-    # Substitui separadores por espaco
+    # Replace separators with spaces
     name = name.replace('_', ' ').replace('-', ' ')
-    # Remove palavras puramente numericas soltas (ex: "01", "02")
+    # Remove purely numeric standalone words (e.g.: "01", "02")
     name = re.sub(r'\b\d+\b', '', name)
-    # Normaliza espacos e capitaliza
+    # Normalize spaces and capitalize
     name = ' '.join(w for w in name.split() if w)
     return name.title() if name else filename
 
 
 def _gerar_descricao_ia(title):
-    """Usa Claude CLI para gerar descricao curta a partir do titulo."""
+    """Uses Claude CLI to generate a short description from the title."""
     prompt = (
         f'Gere uma descricao curta (2-3 frases) em portugues para um video de YouTube '
         f'com o titulo: "{title}". Retorne apenas a descricao, sem introducao.'
@@ -93,18 +93,18 @@ def _gerar_descricao_ia(title):
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
     except Exception as e:
-        log(f'  IA descricao erro: {e}')
+        log(f'  AI description error: {e}')
     return ''
 
 
 def _collect_mp4s(folder_path):
     """
-    Coleta todos os arquivos MP4 dentro de folder_path, recursivamente.
-    Retorna lista de (caminho_absoluto, nome_arquivo) ordenada por nome.
+    Collects all MP4 files inside folder_path, recursively.
+    Returns a list of (absolute_path, filename) sorted by name.
     """
     found = []
     for root, dirs, files in os.walk(folder_path):
-        # Ignora a propria pasta de destino (clips_dir pode estar dentro)
+        # Ignore the destination folder itself (clips_dir may be inside)
         dirs[:] = [d for d in sorted(dirs) if d != 'clips']
         for f in sorted(files):
             if f.lower().endswith('.mp4'):
@@ -114,9 +114,9 @@ def _collect_mp4s(folder_path):
 
 def _build_manifest(clips_dir, folder_path, gerar_descricao):
     """
-    Constroi a lista de clips para o manifest.
-    Varre folder_path recursivamente em busca de MP4s.
-    Usa manifest.json da pasta de import se existir para metadados.
+    Builds the clip list for the manifest.
+    Scans folder_path recursively for MP4s.
+    Uses manifest.json from the import folder if it exists for metadata.
     """
     manifest_src = os.path.join(folder_path, 'manifest.json')
     mp4_files = _collect_mp4s(folder_path)
@@ -124,19 +124,19 @@ def _build_manifest(clips_dir, folder_path, gerar_descricao):
     if not mp4_files:
         return []
 
-    # Mapa filename->dados do manifest manual (se existir)
+    # Map filename->data from manual manifest (if it exists)
     manual = {}
     if os.path.exists(manifest_src):
         try:
             with open(manifest_src) as f:
                 raw = json.load(f)
-            # suporta lista de clips ou dict com chave "clips"
+            # supports clip list or dict with "clips" key
             entries = raw if isinstance(raw, list) else raw.get('clips', [])
             for entry in entries:
                 fname = os.path.basename(entry.get('file', entry.get('filename', '')))
                 manual[fname] = entry
         except Exception as e:
-            log(f'  manifest.json invalido: {e}, ignorando')
+            log(f'  manifest.json invalid: {e}, ignoring')
 
     clips = []
     for i, (src_path, fname) in enumerate(mp4_files, start=1):
@@ -146,13 +146,13 @@ def _build_manifest(clips_dir, folder_path, gerar_descricao):
         tags = m.get('tags', [])
 
         if not description and gerar_descricao:
-            log(f'  Gerando descricao IA para: {title[:50]}')
+            log(f'  Generating AI description for: {title[:50]}')
             description = _gerar_descricao_ia(title)
 
         dest_file = os.path.join(clips_dir, fname)
         clips.append({
             'index':       i,
-            '_src_path':   src_path,   # origem real (pode estar em subdir)
+            '_src_path':   src_path,   # actual source path (may be in a subdirectory)
             'file':        dest_file,
             'filename':    fname,
             'title':       title,
@@ -165,18 +165,18 @@ def _build_manifest(clips_dir, folder_path, gerar_descricao):
 
 
 # ---------------------------------------------------------------------------
-# Core: processar um subfolder
+# Core: process a subfolder
 # ---------------------------------------------------------------------------
 
 def _read_folder_meta(folder_path):
     """
-    Le metadados opcionais do manifest.json raiz da pasta.
-    Campos reconhecidos no nivel do lote:
-      publish_at  — horario HH:MM para publicar (ex: "14:00")
-                    se ausente, segue o agendamento global (pub_horarios)
-      privacy     — public|unlisted|private (sobrescreve config global)
-      titulo      — nome do lote para exibir no dashboard
-    Retorna dict (pode ser vazio).
+    Reads optional metadata from the folder's root manifest.json.
+    Recognized fields at batch level:
+      publish_at  — HH:MM time to publish (e.g.: "14:00")
+                    if absent, follows the global schedule (pub_horarios)
+      privacy     — public|unlisted|private (overrides global config)
+      titulo      — batch name to display in the dashboard
+    Returns dict (may be empty).
     """
     manifest_src = os.path.join(folder_path, 'manifest.json')
     if not os.path.exists(manifest_src):
@@ -184,7 +184,7 @@ def _read_folder_meta(folder_path):
     try:
         with open(manifest_src) as f:
             data = json.load(f)
-        # manifest pode ser lista (clips) ou dict (meta + clips)
+        # manifest can be a list (clips) or dict (meta + clips)
         if isinstance(data, dict):
             return {
                 'publish_at': data.get('publish_at', ''),
@@ -198,11 +198,11 @@ def _read_folder_meta(folder_path):
 
 def _process_folder(folder_name, gerar_descricao, import_fila=True):
     """
-    Processa um subfolder de imports/.
-    import_fila=True  -> entra na fila normal (pub_horarios do config global)
-    import_fila=False -> usa publish_at do manifest.json se disponivel
+    Processes a subfolder from imports/.
+    import_fila=True  -> enters the normal queue (pub_horarios from global config)
+    import_fila=False -> uses publish_at from manifest.json if available
 
-    Retorna (video_id, qtd_clips) em caso de sucesso, ou None em caso de erro.
+    Returns (video_id, qtd_clips) on success, or None on error.
     """
     folder_path = os.path.join(IMPORTS_DIR, folder_name)
     if not os.path.isdir(folder_path):
@@ -211,56 +211,56 @@ def _process_folder(folder_name, gerar_descricao, import_fila=True):
     date_str  = datetime.now().strftime('%Y%m%d')
     video_id  = f'import_{date_str}_{_sanitize(folder_name)}'
 
-    # Verifica se ja existe no banco
+    # Check if it already exists in the database
     if db.get_live(video_id):
-        log(f'  {video_id} ja existe no banco, pulando')
+        log(f'  {video_id} already exists in database, skipping')
         return None
 
-    # Le metadados do lote (publish_at, privacy, titulo)
+    # Read batch metadata (publish_at, privacy, titulo)
     meta = _read_folder_meta(folder_path)
     titulo_lote = meta.get('titulo') or folder_name
 
-    # publish_at: so usado se import_fila=False
+    # publish_at: only used if import_fila=False
     publish_at = '' if import_fila else meta.get('publish_at', '')
 
-    # Prepara diretorio de destino
+    # Prepare destination directory
     job_dir   = os.path.join(LIVES_DIR, video_id)
     clips_dir = os.path.join(job_dir, 'clips')
     os.makedirs(clips_dir, exist_ok=True)
 
-    # Constroi manifest (antes de mover, para ler lista de arquivos)
+    # Build manifest (before moving, to read file list)
     clips = _build_manifest(clips_dir, folder_path, gerar_descricao)
     if not clips:
-        log(f'  Nenhum MP4 em {folder_name}, pulando')
+        log(f'  No MP4s in {folder_name}, skipping')
         shutil.rmtree(job_dir, ignore_errors=True)
         return None
 
-    # Aplica privacy do lote a cada clip (se especificado)
+    # Apply batch privacy to each clip (if specified)
     if meta.get('privacy'):
         for clip in clips:
             clip['privacy'] = meta['privacy']
 
-    # Move MP4s (usa _src_path para suportar arquivos em subdiretorios)
+    # Move MP4s (uses _src_path to support files in subdirectories)
     for clip in clips:
         src = clip.pop('_src_path', os.path.join(folder_path, clip['filename']))
         dst = clip['file']
         if os.path.exists(src):
             shutil.move(src, dst)
-            log(f'  Movido: {clip["filename"]}')
+            log(f'  Moved: {clip["filename"]}')
 
-    # Escreve clips_manifest.json
+    # Write clips_manifest.json
     manifest_path = os.path.join(job_dir, 'clips_manifest.json')
     with open(manifest_path, 'w', encoding='utf-8') as f:
         json.dump(clips, f, ensure_ascii=False, indent=2)
 
-    # Observacao inclui publish_at se definido
-    obs_parts = [f'importado de {folder_name}']
+    # Notes include publish_at if defined
+    obs_parts = [f'imported from {folder_name}']
     if publish_at:
         obs_parts.append(f'publish_at={publish_at}')
     if meta.get('privacy'):
         obs_parts.append(f'privacy={meta["privacy"]}')
 
-    # Insere no banco
+    # Insert into database
     now = datetime.now().strftime('%Y-%m-%d %H:%M')
     db.add_lives([{
         'video_id':            video_id,
@@ -278,9 +278,9 @@ def _process_folder(folder_name, gerar_descricao, import_fila=True):
         'data_corte':          now,
     }])
 
-    log(f'  Criado {video_id}: {len(clips)} clips | publish_at={publish_at or "fila_global"} | privacy={meta.get("privacy") or "config_global"}')
+    log(f'  Created {video_id}: {len(clips)} clips | publish_at={publish_at or "global_queue"} | privacy={meta.get("privacy") or "global_config"}')
 
-    # Remove subfolder de imports/
+    # Remove subfolder from imports/
     shutil.rmtree(folder_path, ignore_errors=True)
 
     return video_id, len(clips)
@@ -292,20 +292,20 @@ def _process_folder(folder_name, gerar_descricao, import_fila=True):
 
 def process_imports(config=None):
     """
-    Varre imports/ e processa todos os subfolders novos.
-    Retorna lista de dicts com resultado por pasta.
+    Scans imports/ and processes all new subfolders.
+    Returns a list of dicts with the result per folder.
     """
     if not os.path.isdir(IMPORTS_DIR):
         os.makedirs(IMPORTS_DIR, exist_ok=True)
-        log('Pasta imports/ criada (vazia)')
+        log('imports/ folder created (empty)')
         return []
 
     if config is None:
         config = db.load_config()
 
     gerar_descricao = config.get('import_gerar_descricao', 'false') == 'true'
-    # import_fila_global=true  -> ignora publish_at do manifest, entra na fila normal
-    # import_fila_global=false -> respeita publish_at do manifest se definido
+    # import_fila_global=true  -> ignores publish_at from manifest, enters normal queue
+    # import_fila_global=false -> respects publish_at from manifest if defined
     import_fila = config.get('import_fila_global', 'true') == 'true'
 
     folders = [
@@ -315,22 +315,22 @@ def process_imports(config=None):
     ]
 
     if not folders:
-        log('imports/: nenhuma pasta nova encontrada')
+        log('imports/: no new folders found')
         return []
 
-    log(f'imports/: {len(folders)} pasta(s) encontrada(s)')
+    log(f'imports/: {len(folders)} folder(s) found')
     results = []
     for folder_name in sorted(folders):
-        log(f'  Processando: {folder_name}')
+        log(f'  Processing: {folder_name}')
         try:
             res = _process_folder(folder_name, gerar_descricao, import_fila)
             if res:
                 video_id, qtd = res
                 results.append({'pasta': folder_name, 'video_id': video_id, 'clips': qtd, 'ok': True})
             else:
-                results.append({'pasta': folder_name, 'ok': False, 'motivo': 'sem clips ou ja existente'})
+                results.append({'pasta': folder_name, 'ok': False, 'motivo': 'no clips or already exists'})
         except Exception as e:
-            log(f'  ERRO ao processar {folder_name}: {e}')
+            log(f'  ERROR processing {folder_name}: {e}')
             results.append({'pasta': folder_name, 'ok': False, 'motivo': str(e)})
 
     return results
@@ -338,8 +338,8 @@ def process_imports(config=None):
 
 def clean_imports():
     """
-    Remove todo o conteudo de imports/ (pastas nao processadas ou residuos).
-    Retorna quantidade de itens removidos.
+    Removes all content from imports/ (unprocessed folders or residual files).
+    Returns the number of items removed.
     """
     if not os.path.isdir(IMPORTS_DIR):
         return 0
@@ -347,15 +347,15 @@ def clean_imports():
     for item in items:
         path = os.path.join(IMPORTS_DIR, item)
         shutil.rmtree(path) if os.path.isdir(path) else os.remove(path)
-    log(f'clean_imports: {len(items)} item(s) removidos')
+    log(f'clean_imports: {len(items)} item(s) removed')
     return len(items)
 
 
 def clean_clips(only_fully_published=True):
     """
-    Remove a pasta clips/ das lives que ja tiveram todos os clips publicados.
-    Se only_fully_published=False, remove clips/ de TODAS as lives (uso com cuidado).
-    Retorna quantidade de lives limpas.
+    Removes the clips/ folder from lives that have had all clips published.
+    If only_fully_published=False, removes clips/ from ALL lives (use with caution).
+    Returns the number of lives cleaned.
     """
     lives = db.get_lives()
     cleaned = 0
@@ -372,30 +372,30 @@ def clean_clips(only_fully_published=True):
             clips_path = os.path.join(LIVES_DIR, vid, 'clips')
             if os.path.isdir(clips_path) and os.listdir(clips_path):
                 shutil.rmtree(clips_path)
-                os.makedirs(clips_path)  # recria vazia para nao quebrar checagens
-                log(f'  Clips limpos: {vid}')
+                os.makedirs(clips_path)  # recreate empty so checks don't break
+                log(f'  Clips cleaned: {vid}')
                 cleaned += 1
 
-    log(f'clean_clips: {cleaned} live(s) limpas')
+    log(f'clean_clips: {cleaned} live(s) cleaned')
     return cleaned
 
 
 # ---------------------------------------------------------------------------
-# Distribuicao entre instancias
+# Distribution between instances
 # ---------------------------------------------------------------------------
 
-# Raiz onde ficam todas as instancias (ex: /home/nmaldaner/projetos/)
+# Root where all instances live (e.g.: /home/nmaldaner/projetos/)
 _INSTANCES_BASE = os.path.dirname(PROJECT_ROOT)
 _INSTANCE_NAMES = [f'yt-pub-lives{i}' for i in range(1, 10)]
 
-# Pasta central de distribuicao (fora das instancias)
+# Central distribution folder (outside the instances)
 DIST_IMPORTS_DIR = '/home/nmaldaner/projetos/yt-pub-lives/imports'
 
 
 def _collect_all_mp4s_flat(source_dir=None):
     """
-    Coleta todos os MP4s dentro de source_dir recursivamente (exceto .hidden).
-    Retorna lista de caminhos absolutos ordenados.
+    Collects all MP4s inside source_dir recursively (except .hidden).
+    Returns a list of sorted absolute paths.
     """
     src = source_dir or IMPORTS_DIR
     found = []
@@ -409,10 +409,10 @@ def _collect_all_mp4s_flat(source_dir=None):
 
 def distribute_imports(config=None):
     """
-    Le MP4s de DIST_IMPORTS_DIR (/home/nmaldaner/projetos/yt-pub-lives/imports/)
-    e distribui round-robin para imports/dist_TIMESTAMP/ de cada uma das 7 instancias.
-    Cada instancia processa na sua hora (scheduler import_auto ou scan manual).
-    Retorna dict: { total, source, por_instancia: [{instancia, clips, ok}] }
+    Reads MP4s from DIST_IMPORTS_DIR (/home/nmaldaner/projetos/yt-pub-lives/imports/)
+    and distributes round-robin to imports/dist_TIMESTAMP/ of each of the 7 instances.
+    Each instance processes at its own time (scheduler import_auto or manual scan).
+    Returns dict: { total, source, por_instancia: [{instancia, clips, ok}] }
     """
     if not os.path.isdir(DIST_IMPORTS_DIR):
         os.makedirs(DIST_IMPORTS_DIR, exist_ok=True)
@@ -420,19 +420,19 @@ def distribute_imports(config=None):
 
     all_mp4s = _collect_all_mp4s_flat(DIST_IMPORTS_DIR)
     if not all_mp4s:
-        log(f'distribute_imports: nenhum MP4 encontrado em {DIST_IMPORTS_DIR}')
+        log(f'distribute_imports: no MP4s found in {DIST_IMPORTS_DIR}')
         return {'total': 0, 'source': DIST_IMPORTS_DIR, 'por_instancia': []}
 
-    # Filtra instancias que existem no disco
+    # Filter instances that exist on disk
     instances = [
         os.path.join(_INSTANCES_BASE, name)
         for name in _INSTANCE_NAMES
         if os.path.isdir(os.path.join(_INSTANCES_BASE, name))
     ]
     n = len(instances)
-    log(f'distribute_imports: {len(all_mp4s)} MP4(s) -> {n} instancias')
+    log(f'distribute_imports: {len(all_mp4s)} MP4(s) -> {n} instances')
 
-    # Round-robin: video i vai para instances[i % n]
+    # Round-robin: video i goes to instances[i % n]
     buckets = [[] for _ in range(n)]
     for i, mp4 in enumerate(all_mp4s):
         buckets[i % n].append(mp4)
@@ -463,11 +463,11 @@ def distribute_imports(config=None):
                 moved.append(fname)
                 log(f'  -> {inst_name}: {fname}')
             except Exception as e:
-                log(f'  ERRO ao mover {fname} para {inst_name}: {e}')
+                log(f'  ERROR moving {fname} to {inst_name}: {e}')
 
         results.append({'instancia': inst_name, 'clips': len(moved), 'ok': True})
 
-    # Remove diretorios vazios que sobraram em imports/
+    # Remove empty directories left behind in imports/
     for root, dirs, files in os.walk(IMPORTS_DIR, topdown=False):
         if root != IMPORTS_DIR and not os.listdir(root):
             try:
@@ -479,7 +479,7 @@ def distribute_imports(config=None):
 
 
 # ---------------------------------------------------------------------------
-# Execucao direta (teste / CLI)
+# Direct execution (test / CLI)
 # ---------------------------------------------------------------------------
 
 if __name__ == '__main__':
@@ -492,9 +492,9 @@ if __name__ == '__main__':
         print(json.dumps(results, ensure_ascii=False, indent=2))
     elif action == 'clean-imports':
         n = clean_imports()
-        print(f'{n} itens removidos de imports/')
+        print(f'{n} items removed from imports/')
     elif action == 'clean-clips':
         n = clean_clips(only_fully_published='--all' not in sys.argv)
-        print(f'{n} lives com clips limpos')
+        print(f'{n} lives with clips cleaned')
     else:
-        print(f'Uso: {sys.argv[0]} scan | distribute | clean-imports | clean-clips [--all]')
+        print(f'Usage: {sys.argv[0]} scan | distribute | clean-imports | clean-clips [--all]')

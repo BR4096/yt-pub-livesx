@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-setup-db — Cria e inicializa o banco SQLite local.
+setup-db — Creates and initializes the local SQLite database.
 
-Uso:
-  setup-db              # Cria DB vazio com schema
-  setup-db --import     # Cria DB e importa dados do Google Sheets
+Usage:
+  setup-db              # Create empty DB with schema
+  setup-db --import     # Create DB and import data from Google Sheets
 """
 
 import json
@@ -76,7 +76,7 @@ def sheets_get(token, spreadsheet_id, range_str):
         resp = urllib.request.urlopen(req)
         return json.loads(resp.read())
     except urllib.error.HTTPError as e:
-        print(f'  Erro ao ler {range_str}: {e.code} {e.read().decode()[:100]}')
+        print(f'  Error reading {range_str}: {e.code} {e.read().decode()[:100]}')
         return {'values': []}
 
 
@@ -85,22 +85,22 @@ def import_from_sheets():
     load_env()
     spreadsheet_id = os.environ.get('SPREADSHEET_ID', '')
     if not spreadsheet_id:
-        print('ERRO: SPREADSHEET_ID nao definido no .env')
+        print('ERROR: SPREADSHEET_ID not defined in .env')
         return False
 
-    print(f'==> Obtendo token OAuth...')
+    print(f'==> Getting OAuth token...')
     try:
         token = get_access_token()
         if not token:
-            print('ERRO: Nao foi possivel obter token (credentials.enc ausente?)')
+            print('ERROR: Could not get token (credentials.enc missing?)')
             return False
         print('    Token OK')
     except Exception as e:
-        print(f'ERRO: {e}')
+        print(f'ERROR: {e}')
         return False
 
     # Import CONFIG
-    print(f'==> Importando CONFIG...')
+    print(f'==> Importing CONFIG...')
     result = sheets_get(token, spreadsheet_id, 'CONFIG!A1:B200')
     rows = result.get('values', [])
     if len(rows) > 1:
@@ -109,12 +109,12 @@ def import_from_sheets():
             if len(row) >= 2 and row[0]:
                 config_data[row[0]] = row[1]
         db.update_config(config_data)
-        print(f'    {len(config_data)} chaves importadas')
+        print(f'    {len(config_data)} keys imported')
     else:
-        print('    Nenhum dado')
+        print('    No data')
 
     # Import LIVES
-    print(f'==> Importando LIVES...')
+    print(f'==> Importing LIVES...')
     result = sheets_get(token, spreadsheet_id, 'LIVES!A1:M1000')
     rows = result.get('values', [])
     if len(rows) > 1:
@@ -127,12 +127,12 @@ def import_from_sheets():
             if live.get('video_id'):
                 lives_list.append(live)
         db.add_lives(lives_list)
-        print(f'    {len(lives_list)} lives importadas')
+        print(f'    {len(lives_list)} lives imported')
     else:
-        print('    Nenhum dado')
+        print('    No data')
 
     # Import PUBLICADOS
-    print(f'==> Importando PUBLICADOS...')
+    print(f'==> Importing PUBLICADOS...')
     result = sheets_get(token, spreadsheet_id, 'PUBLICADOS!A1:K1000')
     rows = result.get('values', [])
     if len(rows) > 1:
@@ -147,9 +147,9 @@ def import_from_sheets():
                 continue
             db.add_publicado(pub)
             count += 1
-        print(f'    {count} publicados importados')
+        print(f'    {count} published records imported')
     else:
-        print('    Nenhum dado')
+        print('    No data')
 
     return True
 
@@ -164,32 +164,32 @@ def main():
     print()
 
     # Auto-create DB and tables
-    print('==> Criando banco de dados...')
+    print('==> Creating database...')
     conn = db.get_db()
-    print(f'    DB criado em {db.DB_PATH}')
+    print(f'    DB created at {db.DB_PATH}')
 
-    # Verifica prompts default — vem do template, se faltar, configura pelo dashboard
-    print('==> Verificando prompts...')
+    # Check default prompts — come from template; if missing, configure via dashboard
+    print('==> Checking prompts...')
     for prompt_name in ('prompt_cortes.txt', 'prompt_pub.txt', 'prompt_thumb.txt'):
         dest = os.path.join(CONFIG_DIR, prompt_name)
         if os.path.exists(dest):
             print(f'    {prompt_name} OK')
         else:
-            print(f'    {prompt_name} nao encontrado (configure pelo dashboard)')
+            print(f'    {prompt_name} not found (configure via dashboard)')
 
     # Check if DB already has data
     config = db.load_config()
     lives = db.get_lives()
     pubs = db.get_publicados()
-    print(f'    Estado atual: {len(config)} configs, {len(lives)} lives, {len(pubs)} publicados')
+    print(f'    Current state: {len(config)} configs, {len(lives)} lives, {len(pubs)} published')
 
     if do_import:
         if lives or pubs:
             print()
-            print('AVISO: DB ja contem dados. A importacao vai ADICIONAR dados (nao substituir).')
-            resp = input('Continuar? (s/N) ')
-            if resp.lower() != 's':
-                print('Cancelado.')
+            print('WARNING: DB already contains data. Import will ADD data (not replace).')
+            resp = input('Continue? (y/N) ')
+            if resp.lower() != 'y':
+                print('Cancelled.')
                 return
         print()
         ok = import_from_sheets()
@@ -199,15 +199,15 @@ def main():
             lives = db.get_lives()
             pubs = db.get_publicados()
             print()
-            print(f'==> Importacao concluida!')
-            print(f'    {len(config)} configs, {len(lives)} lives, {len(pubs)} publicados')
+            print(f'==> Import complete!')
+            print(f'    {len(config)} configs, {len(lives)} lives, {len(pubs)} published')
         else:
             print()
-            print('ERRO na importacao. O DB foi criado mas pode estar vazio.')
+            print('ERROR during import. DB was created but may be empty.')
     else:
         print()
-        print('==> DB pronto (vazio).')
-        print('    Para importar dados do Google Sheets: setup-db --import')
+        print('==> DB ready (empty).')
+        print('    To import data from Google Sheets: setup-db --import')
 
 
 if __name__ == '__main__':

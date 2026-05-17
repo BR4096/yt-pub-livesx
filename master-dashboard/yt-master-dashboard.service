@@ -1,6 +1,6 @@
 [Unit]
-# TEMPLATE — o scripts/setup-system gera este service inline com paths
-# do template detectado, entao este arquivo serve so de referencia/historico.
+# TEMPLATE — scripts/setup-system generates this service inline with paths
+# from the detected template, so this file serves only as reference/history.
 #   __TEMPLATE_DIR__   substituido para o path real do template
 Description=YT Pub Master Dashboard (all instances)
 After=network.target

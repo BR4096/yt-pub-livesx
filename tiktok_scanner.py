@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-tiktok_scanner.py — Scanner de canais TikTok com fila persistente.
+tiktok_scanner.py — TikTok channel scanner with persistent queue.
 
-Arquitetura:
-  - scan_channel_to_queue: lista metadata (flat-playlist) e popula tiktok_videos
-    com status='pendente' (ou 'pulado' para photo-posts). NAO baixa MP4.
-  - download_pending_videos: consome a fila (oldest-first por default), baixa
-    via yt-dlp e cria pasta em imports/. Nao chama flat-playlist.
-  - process_all_channels: fluxo completo (scan + download) para manutencao.
+Architecture:
+  - scan_channel_to_queue: lists metadata (flat-playlist) and populates tiktok_videos
+    with status='pendente' (or 'pulado' for photo-posts). Does NOT download MP4.
+  - download_pending_videos: consumes the queue (oldest-first by default), downloads
+    via yt-dlp and creates a folder in imports/. Does not call flat-playlist.
+  - process_all_channels: full flow (scan + download) for maintenance.
 
-O scheduler chama apenas download_pending_videos no horario agendado. Scans
-completos sao disparados manualmente (dashboard) ou via scan leve.
+The scheduler only calls download_pending_videos at the scheduled time. Full
+scans are triggered manually (dashboard) or via light scan.
 """
 
 import json
@@ -40,19 +40,19 @@ def _build_tiktok_url(handle):
 
 
 # ---------------------------------------------------------------------------
-# SCAN: popula a fila (tiktok_videos) sem baixar MP4
+# SCAN: populate the queue (tiktok_videos) without downloading MP4
 # ---------------------------------------------------------------------------
 
 def scan_channel_to_queue(channel, playlist_end=5000, timeout=1200):
-    """Lista metadata do canal e popula a fila.
+    """Lists channel metadata and populates the queue.
 
-    Retorna dict: {novos, pulados, ja_conhecidos, antes_data, total_scanned, erro}.
+    Returns dict: {novos, pulados, ja_conhecidos, antes_data, total_scanned, erro}.
     """
     handle = channel['handle']
     url = _build_tiktok_url(handle)
     data_desde = channel.get('data_desde', '')
 
-    log(f'  Scan -> fila: {handle} (desde={data_desde}, limite={playlist_end})')
+    log(f'  Scan -> queue: {handle} (since={data_desde}, limit={playlist_end})')
 
     cmd = ['yt-dlp', '--flat-playlist', '-j', '--no-warnings']
     if playlist_end and playlist_end > 0:
@@ -63,11 +63,11 @@ def scan_channel_to_queue(channel, playlist_end=5000, timeout=1200):
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         if result.returncode != 0:
             err = (result.stderr or '')[:200]
-            log(f'  yt-dlp erro: {err}')
+            log(f'  yt-dlp error: {err}')
             return {'novos': 0, 'pulados': 0, 'ja_conhecidos': 0, 'antes_data': 0,
                     'total_scanned': 0, 'erro': err}
     except subprocess.TimeoutExpired:
-        log(f'  yt-dlp timeout para {handle}')
+        log(f'  yt-dlp timeout for {handle}')
         return {'novos': 0, 'pulados': 0, 'ja_conhecidos': 0, 'antes_data': 0,
                 'total_scanned': 0, 'erro': 'timeout'}
 
@@ -104,7 +104,7 @@ def scan_channel_to_queue(channel, playlist_end=5000, timeout=1200):
                      or f'https://www.tiktok.com/@{handle.lstrip("@")}/video/{vid_id}')
 
         if not duration:
-            # Photo-post / slideshow: marca como pulado direto
+            # Photo-post / slideshow: mark as skipped immediately
             db.upsert_tiktok_video(vid_id, handle, title=title, url=video_url,
                                    upload_date=upload_date, duration=0,
                                    status='pulado', skip_reason='foto_post')
@@ -116,8 +116,8 @@ def scan_channel_to_queue(channel, playlist_end=5000, timeout=1200):
                                status='pendente')
         novos += 1
 
-    log(f'  Scan: {total} escaneados | {novos} novos na fila | {ja_conhecidos} ja conhecidos | '
-        f'{antes_data} antes de {data_desde} | {pulados} pulados (foto-post)')
+    log(f'  Scan: {total} scanned | {novos} new in queue | {ja_conhecidos} already known | '
+        f'{antes_data} before {data_desde} | {pulados} skipped (photo-post)')
 
     db.update_tiktok_channel(channel['id'],
         ultimo_scan=datetime.now().strftime('%Y-%m-%d %H:%M'))
@@ -127,14 +127,14 @@ def scan_channel_to_queue(channel, playlist_end=5000, timeout=1200):
 
 
 # ---------------------------------------------------------------------------
-# FETCH NEW: scan incremental com early-break no cutoff
+# FETCH NEW: incremental scan with early-break at cutoff
 # ---------------------------------------------------------------------------
 
 def fetch_new_videos_for_channel(channel, safety_cap=5000, timeout=1200):
-    """Scan incremental: pega so videos com upload_date > cutoff.
+    """Incremental scan: fetches only videos with upload_date > cutoff.
 
-    Cutoff = MAX(upload_date) ja conhecida na fila. Fallback: data_desde.
-    yt-dlp retorna newest-first; iteramos e paramos assim que ver upload_date < cutoff.
+    Cutoff = MAX(upload_date) already known in the queue. Fallback: data_desde.
+    yt-dlp returns newest-first; we iterate and stop as soon as upload_date < cutoff.
     """
     handle = channel['handle']
     url = _build_tiktok_url(handle)
@@ -145,7 +145,7 @@ def fetch_new_videos_for_channel(channel, safety_cap=5000, timeout=1200):
 
     data_desde_fmt = (channel.get('data_desde', '') or '').replace('-', '')
 
-    log(f'  Fetch novos: {handle} (cutoff={cutoff or "sem cutoff"})')
+    log(f'  Fetch new: {handle} (cutoff={cutoff or "no cutoff"})')
 
     cmd = ['yt-dlp', '--flat-playlist', '-j', '--no-warnings',
            '--playlist-end', str(safety_cap), url]
@@ -154,11 +154,11 @@ def fetch_new_videos_for_channel(channel, safety_cap=5000, timeout=1200):
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         if result.returncode != 0:
             err = (result.stderr or '')[:200]
-            log(f'  yt-dlp erro: {err}')
+            log(f'  yt-dlp error: {err}')
             return {'novos': 0, 'pulados': 0, 'ja_conhecidos': 0, 'antes_data': 0,
                     'parou_em_cutoff': False, 'erro': err}
     except subprocess.TimeoutExpired:
-        log(f'  yt-dlp timeout para {handle}')
+        log(f'  yt-dlp timeout for {handle}')
         return {'novos': 0, 'pulados': 0, 'ja_conhecidos': 0, 'antes_data': 0,
                 'parou_em_cutoff': False, 'erro': 'timeout'}
 
@@ -179,12 +179,12 @@ def fetch_new_videos_for_channel(channel, safety_cap=5000, timeout=1200):
 
         upload_date = info.get('upload_date', '')
 
-        # Early break: yt-dlp retorna newest-first; se ja caimos no cutoff, para aqui.
+        # Early break: yt-dlp returns newest-first; if we've fallen below the cutoff, stop here.
         if cutoff and upload_date and upload_date < cutoff:
             parou_em_cutoff = True
             break
 
-        # Filtro extra de data_desde (nao quebra; so nao insere)
+        # Extra data_desde filter (doesn't break; just doesn't insert)
         if data_desde_fmt and upload_date and upload_date < data_desde_fmt:
             antes_data += 1
             continue
@@ -210,9 +210,9 @@ def fetch_new_videos_for_channel(channel, safety_cap=5000, timeout=1200):
                                status='pendente')
         novos += 1
 
-    log(f'  Fetch: {novos} novos na fila | {ja_conhecidos} ja conhecidos | '
-        f'{pulados} pulados | {antes_data} antes de {channel.get("data_desde","")} | '
-        f'{"parou no cutoff" if parou_em_cutoff else "iterou ate o fim"}')
+    log(f'  Fetch: {novos} new in queue | {ja_conhecidos} already known | '
+        f'{pulados} skipped | {antes_data} before {channel.get("data_desde","")} | '
+        f'{"stopped at cutoff" if parou_em_cutoff else "iterated to end"}')
 
     db.update_tiktok_channel(channel['id'],
         ultimo_scan=datetime.now().strftime('%Y-%m-%d %H:%M'))
@@ -222,11 +222,11 @@ def fetch_new_videos_for_channel(channel, safety_cap=5000, timeout=1200):
 
 
 # ---------------------------------------------------------------------------
-# DOWNLOAD: consome a fila (tiktok_videos status='pendente')
+# DOWNLOAD: consume the queue (tiktok_videos status='pendente')
 # ---------------------------------------------------------------------------
 
 def _download_single(video, folder_path):
-    """Baixa um video. Retorna nome do arquivo mp4 ou None."""
+    """Downloads a video. Returns the mp4 filename or None."""
     vid_id = video['tiktok_id']
     video_url = video['url']
     out_template = os.path.join(folder_path, f'{vid_id}.%(ext)s')
@@ -240,11 +240,11 @@ def _download_single(video, folder_path):
             capture_output=True, text=True, timeout=300
         )
     except subprocess.TimeoutExpired:
-        log(f'  Timeout ao baixar {vid_id}')
+        log(f'  Timeout downloading {vid_id}')
         return None
 
     if result.returncode != 0:
-        log(f'  Download falhou {vid_id}: {(result.stderr or "")[:200]}')
+        log(f'  Download failed {vid_id}: {(result.stderr or "")[:200]}')
         return None
 
     for f in os.listdir(folder_path):
@@ -254,9 +254,9 @@ def _download_single(video, folder_path):
 
 
 def download_pending_for_channel(channel, max_por_scan=None):
-    """Baixa N pendentes de um canal (oldest-first), cria manifest.
+    """Downloads N pending videos for a channel (oldest-first), creates manifest.
 
-    Retorna dict: {downloaded, errors, folder, handle}.
+    Returns dict: {downloaded, errors, folder, handle}.
     """
     handle = channel['handle']
     if max_por_scan is None:
@@ -293,7 +293,7 @@ def download_pending_for_channel(channel, max_por_scan=None):
             db.mark_tiktok_video_status(vid_id, 'baixado')
             continue
 
-        log(f'  Baixando: {title[:50]} ({vid_id})')
+        log(f'  Downloading: {title[:50]} ({vid_id})')
         mp4_file = _download_single(video, folder_path)
 
         if not mp4_file:
@@ -318,16 +318,16 @@ def download_pending_for_channel(channel, max_por_scan=None):
         }
         with open(manifest_path, 'w') as f:
             json.dump(manifest, f, ensure_ascii=False, indent=2)
-        log(f'  Manifest: {folder_name} ({len(downloaded_new)} novo(s), {len(all_clips)} total)')
+        log(f'  Manifest: {folder_name} ({len(downloaded_new)} new, {len(all_clips)} total)')
     else:
-        # Remove pasta vazia se foi criada agora
+        # Remove empty folder if it was just created
         try:
             if not existing_clips:
                 os.rmdir(folder_path)
         except OSError:
             pass
 
-    # Atualiza contador do canal
+    # Update channel counter
     stats = db.get_tiktok_channel_stats(handle)
     db.update_tiktok_channel(channel['id'], total_baixados=stats['baixado'])
 
@@ -336,29 +336,29 @@ def download_pending_for_channel(channel, max_por_scan=None):
 
 
 def download_pending_videos(config=None):
-    """Roda download_pending_for_channel em todos os canais ativos.
+    """Runs download_pending_for_channel on all active channels.
 
-    Chamado pelo scheduler no horario tiktok_horarios.
+    Called by the scheduler at tiktok_horarios time.
     """
     channels = db.get_tiktok_channels()
     active = [c for c in channels if c.get('ativo', 0) == 1]
     if not active:
-        log('  Nenhum canal TikTok ativo')
+        log('  No active TikTok channels')
         return []
 
-    log(f'  Download da fila: {len(active)} canal(is) ativo(s)')
+    log(f'  Queue download: {len(active)} active channel(s)')
     results = []
     for channel in active:
         try:
             r = download_pending_for_channel(channel)
             results.append(r)
         except Exception as e:
-            log(f'  Erro no canal {channel.get("handle")}: {e}')
+            log(f'  Error on channel {channel.get("handle")}: {e}')
             results.append({'handle': channel.get('handle'), 'downloaded': 0,
                            'errors': 1, 'ok': False, 'motivo': str(e)})
 
     total = sum(r.get('downloaded', 0) for r in results)
-    log(f'  TikTok download concluido: {total} video(s) baixado(s)')
+    log(f'  TikTok download complete: {total} video(s) downloaded')
 
     if total > 0:
         try:
@@ -366,9 +366,9 @@ def download_pending_videos(config=None):
             import_results = import_worker.process_imports(config)
             processed = [r for r in import_results if r.get('ok')]
             if processed:
-                log(f'  Import worker: {len(processed)} lote(s) processado(s)')
+                log(f'  Import worker: {len(processed)} batch(es) processed')
         except Exception as e:
-            log(f'  Import worker erro: {e}')
+            log(f'  Import worker error: {e}')
 
     return results
 
@@ -378,19 +378,19 @@ def download_pending_videos(config=None):
 # ---------------------------------------------------------------------------
 
 def process_all_channels(config=None, playlist_end=5000):
-    """Fluxo completo (scan + download). Uso: scan manual + download imediato."""
+    """Full flow (scan + download). Use: manual scan + immediate download."""
     channels = db.get_tiktok_channels()
     active = [c for c in channels if c.get('ativo', 0) == 1]
     if not active:
-        log('  Nenhum canal TikTok ativo')
+        log('  No active TikTok channels')
         return []
 
-    log(f'  Scan+download: {len(active)} canal(is) ativo(s)')
+    log(f'  Scan+download: {len(active)} active channel(s)')
     for channel in active:
         try:
             scan_channel_to_queue(channel, playlist_end=playlist_end)
         except Exception as e:
-            log(f'  Erro scan canal {channel.get("handle")}: {e}')
+            log(f'  Error scanning channel {channel.get("handle")}: {e}')
 
     return download_pending_videos(config)
 
@@ -401,35 +401,35 @@ def process_all_channels(config=None, playlist_end=5000):
 if __name__ == '__main__':
     action = sys.argv[1] if len(sys.argv) > 1 else 'scan'
     if action == 'scan':
-        # Scan completo + download imediato
+        # Full scan + immediate download
         results = process_all_channels()
         print(json.dumps(results, ensure_ascii=False, indent=2))
     elif action == 'scan-only':
-        # So popula fila, sem baixar
+        # Only populate queue, without downloading
         channels = [c for c in db.get_tiktok_channels() if c.get('ativo', 0) == 1]
         out = [scan_channel_to_queue(c) for c in channels]
         print(json.dumps(out, ensure_ascii=False, indent=2))
     elif action == 'download':
-        # So consome fila
+        # Only consume queue
         results = download_pending_videos()
         print(json.dumps(results, ensure_ascii=False, indent=2))
     elif action == 'queue':
         channels = db.get_tiktok_channels()
         for c in channels:
             stats = db.get_tiktok_channel_stats(c['handle'])
-            print(f'  [{c["id"]}] {c["handle"]}: pendentes={stats["pendente"]} '
-                  f'baixados={stats["baixado"]} pulados={stats["pulado"]} erros={stats["erro"]}')
+            print(f'  [{c["id"]}] {c["handle"]}: pending={stats["pendente"]} '
+                  f'downloaded={stats["baixado"]} skipped={stats["pulado"]} errors={stats["erro"]}')
     elif action == 'list':
         channels = db.get_tiktok_channels()
         for c in channels:
-            print(f'  [{c["id"]}] {c["handle"]} ({"ativo" if c["ativo"] else "inativo"}) '
-                  f'desde={c["data_desde"]} max={c["max_por_scan"]} baixados={c["total_baixados"]}')
+            print(f'  [{c["id"]}] {c["handle"]} ({"active" if c["ativo"] else "inactive"}) '
+                  f'since={c["data_desde"]} max={c["max_por_scan"]} downloaded={c["total_baixados"]}')
     elif action == 'add':
         handle = sys.argv[2] if len(sys.argv) > 2 else ''
         if not handle:
-            print('Uso: tiktok_scanner.py add @handle')
+            print('Usage: tiktok_scanner.py add @handle')
             sys.exit(1)
         row_id = db.add_tiktok_channel(handle)
-        print(f'Canal adicionado: {handle} (id={row_id})')
+        print(f'Channel added: {handle} (id={row_id})')
     else:
-        print(f'Uso: {sys.argv[0]} scan | scan-only | download | queue | list | add @handle')
+        print(f'Usage: {sys.argv[0]} scan | scan-only | download | queue | list | add @handle')

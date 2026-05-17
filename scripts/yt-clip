@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# yt-clip — Corta lives do YouTube por tópicos e publica os clips
-# Pipeline: YouTube API (transcrição) → Claude (análise) → FFmpeg (corte) → yt-publish
+# yt-clip — Cuts YouTube lives by topic and publishes the clips
+# Pipeline: YouTube API (transcript) → Claude (analysis) → FFmpeg (cutting) → yt-publish
 #
-# Uso:
-#   yt-clip <video_id> [opções]
+# Usage:
+#   yt-clip <video_id> [options]
 #
-# Exemplos:
-#   yt-clip 5gnTiNoYUcQ                              # Gera prompt manual + corta
-#   yt-clip 5gnTiNoYUcQ --ai claude-api              # Usa Claude API automático
-#   yt-clip 5gnTiNoYUcQ --dry-run                    # Só mostra tópicos sem cortar
-#   yt-clip 5gnTiNoYUcQ --publish                    # Corta e publica no YouTube
+# Examples:
+#   yt-clip 5gnTiNoYUcQ                              # Generate manual prompt + cut
+#   yt-clip 5gnTiNoYUcQ --ai claude-api              # Use automatic Claude API
+#   yt-clip 5gnTiNoYUcQ --dry-run                    # Show topics only, no cutting
+#   yt-clip 5gnTiNoYUcQ --publish                    # Cut and publish to YouTube
 #   yt-clip 5gnTiNoYUcQ --publish --privacy unlisted
 
 set -euo pipefail
@@ -29,8 +29,8 @@ DRY_RUN=false
 PUBLISH=false
 VIDEO_ID=""
 AI_MODE="manual"   # manual | claude-api
-MIN_DURATION=120    # Mínimo 2 min por clip
-MAX_DURATION=900    # Máximo 15 min por clip
+MIN_DURATION=120    # Minimum 2 min per clip
+MAX_DURATION=900    # Maximum 15 min per clip
 
 # --- Parse args ---
 while [[ $# -gt 0 ]]; do
@@ -45,20 +45,20 @@ while [[ $# -gt 0 ]]; do
     --help|-h)
       head -12 "$0" | tail -10
       echo ""
-      echo "Opções:"
-      echo "  --dry-run     Só analisa, não corta nem publica"
-      echo "  --publish     Corta E publica no YouTube"
-      echo "  --privacy     public|unlisted|private (padrão: unlisted)"
-      echo "  --ai          manual|claude-api (padrão: manual)"
-      echo "                manual: gera prompt para colar no Claude (sessão interativa)"
-      echo "                claude-api: usa ANTHROPIC_API_KEY automaticamente"
-      echo "  --work-dir    Diretório de trabalho (padrão: ~/projetos/gws/lives)"
-      echo "  --min-dur     Duração mínima de clip em segundos (padrão: 120)"
-      echo "  --max-dur     Duração máxima de clip em segundos (padrão: 900)"
+      echo "Options:"
+      echo "  --dry-run     Analyze only, do not cut or publish"
+      echo "  --publish     Cut AND publish to YouTube"
+      echo "  --privacy     public|unlisted|private (default: unlisted)"
+      echo "  --ai          manual|claude-api (default: manual)"
+      echo "                manual: generate prompt to paste into Claude (interactive session)"
+      echo "                claude-api: use ANTHROPIC_API_KEY automatically"
+      echo "  --work-dir    Working directory (default: ~/projetos/gws/lives)"
+      echo "  --min-dur     Minimum clip duration in seconds (default: 120)"
+      echo "  --max-dur     Maximum clip duration in seconds (default: 900)"
       exit 0
       ;;
     -*)
-      echo "Erro: opção desconhecida: $1" >&2
+      echo "Error: unknown option: $1" >&2
       exit 1
       ;;
     *)
@@ -67,7 +67,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$VIDEO_ID" ]]; then
-  echo "Erro: forneça o video_id" >&2
+  echo "Error: provide the video_id" >&2
   exit 1
 fi
 
@@ -75,18 +75,18 @@ JOB_DIR="$WORK_DIR/$VIDEO_ID"
 mkdir -p "$JOB_DIR"
 
 # ============================================================
-# ETAPA 1: Baixar transcrição do YouTube
+# STEP 1: Download YouTube transcript
 # ============================================================
-echo "==> [1/5] Baixando transcrição do YouTube..."
+echo "==> [1/5] Downloading YouTube transcript..."
 
 if [[ -f "$JOB_DIR/transcript_raw.json3" ]]; then
-  echo "    Transcrição já existe, pulando download"
+  echo "    Transcript already exists, skipping download"
 else
-  # Tenta com cookies primeiro, fallback sem cookies
+  # Try with cookies first, fallback without cookies
   if ! yt-dlp --cookies-from-browser firefox --remote-components ejs:github \
     --write-auto-sub --sub-lang pt --skip-download --sub-format json3 \
     -o "$JOB_DIR/%(id)s" "https://www.youtube.com/watch?v=$VIDEO_ID" 2>/dev/null; then
-    echo "    Falha com cookies, tentando sem cookies..."
+    echo "    Failed with cookies, trying without cookies..."
     yt-dlp --remote-components ejs:github \
       --write-auto-sub --sub-lang pt --skip-download --sub-format json3 \
       -o "$JOB_DIR/%(id)s" "https://www.youtube.com/watch?v=$VIDEO_ID" 2>/dev/null || true
@@ -97,14 +97,14 @@ else
 fi
 
 if [[ ! -f "$JOB_DIR/transcript_raw.json3" ]]; then
-  echo "Erro: não foi possível baixar a transcrição" >&2
+  echo "Error: could not download the transcript" >&2
   exit 1
 fi
 
 # ============================================================
-# ETAPA 2: Processar transcrição em blocos de ~30s
+# STEP 2: Process transcript into ~30s blocks
 # ============================================================
-echo "==> [2/5] Processando transcrição..."
+echo "==> [2/5] Processing transcript..."
 
 python3 << PYEOF
 import json
@@ -154,29 +154,29 @@ print(f"    {len(segments)} segmentos → {len(blocks)} blocos ({duration_min:.0
 PYEOF
 
 # ============================================================
-# ETAPA 3: Análise de tópicos
+# STEP 3: Topic analysis
 # ============================================================
-echo "==> [3/5] Analisando tópicos (modo: $AI_MODE)..."
+echo "==> [3/5] Analyzing topics (mode: $AI_MODE)..."
 
 PROMPT_CONFIG_FILE="${GWS_CONFIG_DIR:-${SCRIPT_DIR}/../config}/prompt_cortes.txt"
 if [[ -f "$PROMPT_CONFIG_FILE" ]] && [[ -s "$PROMPT_CONFIG_FILE" ]]; then
   PROMPT_TEMPLATE="$(cat "$PROMPT_CONFIG_FILE")"
 else
-  PROMPT_TEMPLATE="Analise esta transcrição de uma live do YouTube e identifique os TÓPICOS PRINCIPAIS.
+  PROMPT_TEMPLATE="Analyze this YouTube live transcript and identify the MAIN TOPICS.
 
-Para cada tópico, retorne:
-- start: timestamp de início (MM:SS)
-- end: timestamp de fim (MM:SS)
-- title: título curto e atrativo para YouTube (max 70 chars)
-- description: descrição de 2-3 frases para o YouTube
-- tags: lista de 3-5 tags relevantes
+For each topic, return:
+- start: start timestamp (MM:SS)
+- end: end timestamp (MM:SS)
+- title: short, attractive YouTube title (max 70 chars)
+- description: 2-3 sentence YouTube description
+- tags: list of 3-5 relevant tags
 
-Regras:
-- Cada clip deve ter entre $MIN_DURATION e $MAX_DURATION segundos
-- Ignore trechos de abertura/saudação e encerramento genérico
-- Foque em conteúdo educacional, dicas práticas e demonstrações
-- Títulos devem ser atrativos e usar palavras-chave de busca
-- Os clips NÃO devem se sobrepor
+Rules:
+- Each clip must be between $MIN_DURATION and $MAX_DURATION seconds
+- Ignore opening/greeting segments and generic closings
+- Focus on educational content, practical tips and demonstrations
+- Titles should be attractive and use search keywords
+- Clips must NOT overlap
 
 Retorne APENAS um JSON válido com esta estrutura:
 {
@@ -196,20 +196,20 @@ TRANSCRIÇÃO:"
 fi
 
 if [[ -f "$JOB_DIR/topics.json" ]]; then
-  echo "    Análise já existe, pulando"
+  echo "    Analysis already exists, skipping"
 
 elif [[ "$AI_MODE" == "claude-api" ]]; then
-  # --- Modo: Claude Code CLI (usa autenticacao OAuth) ---
-  echo "    Usando Claude Code CLI..."
+  # --- Mode: Claude Code CLI (uses OAuth authentication) ---
+  echo "    Using Claude Code CLI..."
 
-  # Monta prompt completo em arquivo
+  # Build full prompt in file
   cat > "$JOB_DIR/prompt.txt" << PROMPTEOF
 $PROMPT_TEMPLATE
 
 $(cat "$JOB_DIR/condensed.txt")
 PROMPTEOF
 
-  # Chama claude CLI e salva resposta (unset CLAUDECODE para permitir execucao em subprocess)
+  # Call claude CLI and save response (unset CLAUDECODE to allow execution in subprocess)
   env -u CLAUDECODE claude -p "$(cat "$JOB_DIR/prompt.txt")" --output-format text > "$JOB_DIR/claude_response.txt" 2>/dev/null
 
   # Extrai JSON da resposta
@@ -224,23 +224,23 @@ if json_match:
     topics_data = json.loads(json_match.group())
     with open('$JOB_DIR/topics.json', 'w') as f:
         json.dump(topics_data, f, ensure_ascii=False, indent=2)
-    print(f"    Encontrados {len(topics_data.get('topics',[]))} tópicos")
+    print(f"    Found {len(topics_data.get('topics',[]))} topics")
 else:
-    print("Erro: Claude não retornou JSON válido")
+    print("Error: Claude did not return valid JSON")
     print(response_text[:500])
     exit(1)
 PYEOF
 
 elif [[ "$AI_MODE" == "anthropic-api" ]]; then
-  # --- Modo: Anthropic API Key (usa ANTHROPIC_API_KEY diretamente) ---
-  echo "    Usando Anthropic API..."
+  # --- Mode: Anthropic API Key (uses ANTHROPIC_API_KEY directly) ---
+  echo "    Using Anthropic API..."
 
   if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
-    echo "Erro: ANTHROPIC_API_KEY não definida" >&2
+    echo "Error: ANTHROPIC_API_KEY not defined" >&2
     exit 1
   fi
 
-  # Monta prompt completo em arquivo
+  # Build full prompt in file
   cat > "$JOB_DIR/prompt.txt" << PROMPTEOF
 $PROMPT_TEMPLATE
 
@@ -277,19 +277,19 @@ if json_match:
     topics_data = json.loads(json_match.group())
     with open('$JOB_DIR/topics.json', 'w') as f:
         json.dump(topics_data, f, ensure_ascii=False, indent=2)
-    print(f"    Encontrados {len(topics_data.get('topics',[]))} tópicos")
+    print(f"    Found {len(topics_data.get('topics',[]))} topics")
 else:
-    print("Erro: Claude não retornou JSON válido")
+    print("Error: Claude did not return valid JSON")
     print(response_text[:500])
     exit(1)
 PYEOF
 
 elif [[ "$AI_MODE" == "openrouter-api" ]]; then
-  # --- Modo: OpenRouter API ---
-  echo "    Usando OpenRouter API..."
+  # --- Mode: OpenRouter API ---
+  echo "    Using OpenRouter API..."
 
   if [[ -z "${OPENROUTER_API_KEY:-}" ]]; then
-    echo "Erro: OPENROUTER_API_KEY não definida" >&2
+    echo "Error: OPENROUTER_API_KEY not defined" >&2
     exit 1
   fi
 
@@ -328,19 +328,19 @@ if json_match:
     topics_data = json.loads(json_match.group())
     with open('$JOB_DIR/topics.json', 'w') as f:
         json.dump(topics_data, f, ensure_ascii=False, indent=2)
-    print(f"    Encontrados {len(topics_data.get('topics',[]))} tópicos")
+    print(f"    Found {len(topics_data.get('topics',[]))} topics")
 else:
-    print("Erro: não retornou JSON válido")
+    print("Error: did not return valid JSON")
     print(response_text[:500])
     exit(1)
 PYEOF
 
 elif [[ "$AI_MODE" == "piramyd-api" ]]; then
-  # --- Modo: Piramyd API ---
-  echo "    Usando Piramyd API..."
+  # --- Mode: Piramyd API ---
+  echo "    Using Piramyd API..."
 
   if [[ -z "${PIRAMYD_API_KEY:-}" ]]; then
-    echo "Erro: PIRAMYD_API_KEY não definida" >&2
+    echo "Error: PIRAMYD_API_KEY not defined" >&2
     exit 1
   fi
 
@@ -379,16 +379,16 @@ if json_match:
     topics_data = json.loads(json_match.group())
     with open('$JOB_DIR/topics.json', 'w') as f:
         json.dump(topics_data, f, ensure_ascii=False, indent=2)
-    print(f"    Encontrados {len(topics_data.get('topics',[]))} tópicos")
+    print(f"    Found {len(topics_data.get('topics',[]))} topics")
 else:
-    print("Erro: não retornou JSON válido")
+    print("Error: did not return valid JSON")
     print(response_text[:500])
     exit(1)
 PYEOF
 
 elif [[ "$AI_MODE" == "manual" ]]; then
-  # --- Modo: Manual (gera prompt para sessão interativa) ---
-  # Salva o prompt completo para ser usado pelo Claude Code ou colado manualmente
+  # --- Mode: Manual (generates prompt for interactive session) ---
+  # Saves the full prompt to be used by Claude Code or pasted manually
   cat > "$JOB_DIR/prompt.txt" << PROMPTEOF
 $PROMPT_TEMPLATE
 
@@ -396,15 +396,15 @@ $(cat "$JOB_DIR/condensed.txt")
 PROMPTEOF
 
   echo ""
-  echo "    Prompt salvo em: $JOB_DIR/prompt.txt"
+  echo "    Prompt saved at: $JOB_DIR/prompt.txt"
   echo ""
-  echo "    Para continuar, crie o arquivo topics.json com a análise."
-  echo "    Opções:"
-  echo "      1. Cole o conteúdo de prompt.txt no Claude e salve a resposta em topics.json"
-  echo "      2. Use o Claude Code: leia prompt.txt, analise e escreva topics.json"
-  echo "      3. Rode novamente com --ai claude-api (requer ANTHROPIC_API_KEY)"
+  echo "    To continue, create the topics.json file with the analysis."
+  echo "    Options:"
+  echo "      1. Paste the content of prompt.txt into Claude and save the response as topics.json"
+  echo "      2. Use Claude Code: read prompt.txt, analyze and write topics.json"
+  echo "      3. Run again with --ai claude-api (requires ANTHROPIC_API_KEY)"
   echo ""
-  echo "    Depois rode novamente: yt-clip $VIDEO_ID"
+  echo "    Then run again: yt-clip $VIDEO_ID"
   exit 0
 fi
 
@@ -416,7 +416,7 @@ with open('$JOB_DIR/topics.json') as f:
     data = json.load(f)
 
 print(f"    Video: {data.get('video_title','')}")
-print(f"    Tópicos: {len(data.get('topics',[]))}")
+print(f"    Topics: {len(data.get('topics',[]))}")
 print("")
 for i, t in enumerate(data.get('topics', []), 1):
     print(f"    [{i}] {t['start']} → {t['end']}  {t['title']}")
@@ -426,43 +426,43 @@ for i, t in enumerate(data.get('topics', []), 1):
 PYEOF
 
 if [[ "$DRY_RUN" == "true" ]]; then
-  echo "==> Dry run completo. Tópicos salvos em: $JOB_DIR/topics.json"
+  echo "==> Dry run complete. Topics saved at: $JOB_DIR/topics.json"
   exit 0
 fi
 
 # ============================================================
-# ETAPA 4: Baixar vídeo e cortar com FFmpeg
+# STEP 4: Download video and cut with FFmpeg
 # ============================================================
-echo "==> [4/5] Baixando vídeo e cortando clips..."
+echo "==> [4/5] Downloading video and cutting clips..."
 
-# Valida source.mp4 existente (remove se corrompido/incompleto)
+# Validate existing source.mp4 (remove if corrupted/incomplete)
 if [[ -f "$JOB_DIR/source.mp4" ]]; then
   if ! ffprobe -v error -select_streams v:0 -show_entries stream=codec_type "$JOB_DIR/source.mp4" >/dev/null 2>&1; then
-    echo "    source.mp4 existente corrompido, removendo para re-download..."
+    echo "    Existing source.mp4 is corrupted, removing for re-download..."
     rm -f "$JOB_DIR/source.mp4"
   fi
 fi
 
 # Download video if not exists
 if [[ ! -f "$JOB_DIR/source.mp4" ]]; then
-  echo "    Baixando vídeo..."
+  echo "    Downloading video..."
   if ! yt-dlp --cookies-from-browser firefox --remote-components ejs:github \
     -f "bestvideo[height<=1080]+bestaudio/best[height<=1080]" \
     --merge-output-format mp4 \
     -o "$JOB_DIR/source.mp4" \
     "https://www.youtube.com/watch?v=$VIDEO_ID" 2>/dev/null; then
-    echo "    Falha com cookies, tentando sem cookies..."
+    echo "    Failed with cookies, trying without cookies..."
     yt-dlp --remote-components ejs:github \
       -f "bestvideo[height<=1080]+bestaudio/best[height<=1080]" \
       --merge-output-format mp4 \
       -o "$JOB_DIR/source.mp4" \
       "https://www.youtube.com/watch?v=$VIDEO_ID" 2>/dev/null
   fi
-  echo "    Download completo"
+  echo "    Download complete"
 
-  # Valida download recem-feito
+  # Validate freshly downloaded file
   if ! ffprobe -v error -select_streams v:0 -show_entries stream=codec_type "$JOB_DIR/source.mp4" >/dev/null 2>&1; then
-    echo "Erro: source.mp4 baixado esta corrompido" >&2
+    echo "Error: downloaded source.mp4 is corrupted" >&2
     rm -f "$JOB_DIR/source.mp4"
     exit 1
   fi
@@ -497,9 +497,9 @@ for i, t in enumerate(data.get('topics', []), 1):
     filepath = os.path.join(clips_dir, filename)
 
     if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
-        print(f"    Clip {i} já existe, pulando")
+        print(f"    Clip {i} already exists, skipping")
     else:
-        print(f"    Cortando clip {i}: {start} → {end} ({duration}s) - {t['title'][:50]}")
+        print(f"    Cutting clip {i}: {start} → {end} ({duration}s) - {t['title'][:50]}")
         cmd = [
             'ffmpeg', '-y',
             '-ss', str(start_sec),
@@ -512,7 +512,7 @@ for i, t in enumerate(data.get('topics', []), 1):
         r = subprocess.run(cmd, capture_output=True)
         if r.returncode != 0 or not os.path.exists(filepath) or os.path.getsize(filepath) == 0:
             err = r.stderr.decode('utf-8', errors='replace')[-300:] if r.stderr else ''
-            print(f"    ERRO clip {i} (rc={r.returncode}): {err}")
+            print(f"    ERROR clip {i} (rc={r.returncode}): {err}")
             failed += 1
             try: os.remove(filepath)
             except OSError: pass
@@ -532,17 +532,17 @@ with open('$JOB_DIR/clips_manifest.json', 'w') as f:
     json.dump(results, f, ensure_ascii=False, indent=2)
 
 total = len(data.get('topics', []))
-print(f"\n    {len(results)} clips cortados em: {clips_dir}")
+print(f"\n    {len(results)} clips cut in: {clips_dir}")
 if failed == total and total > 0:
-    print(f"    ERRO: todos os {total} clips falharam no ffmpeg")
+    print(f"    ERROR: all {total} clips failed in ffmpeg")
     exit(1)
 PYEOF
 
 # ============================================================
-# ETAPA 5: Publicar no YouTube (se --publish)
+# STEP 5: Publish to YouTube (if --publish)
 # ============================================================
 if [[ "$PUBLISH" == "true" ]]; then
-  echo "==> [5/5] Publicando clips no YouTube..."
+  echo "==> [5/5] Publishing clips to YouTube..."
 
   python3 << PYEOF
 import json, subprocess
@@ -553,7 +553,7 @@ with open('$JOB_DIR/clips_manifest.json') as f:
 published = []
 
 for clip in clips:
-    print(f"\n    Publicando: {clip['title']}")
+    print(f"\n    Publishing: {clip['title']}")
 
     tags = ','.join(clip.get('tags', []))
 
@@ -581,21 +581,21 @@ for clip in clips:
             print(f"    ✓ Publicado: https://www.youtube.com/watch?v={vid}")
             break
     else:
-        print(f"    ✗ Erro: {output[:200]}")
+        print(f"    ✗ Error: {output[:200]}")
 
 with open('$JOB_DIR/published.json', 'w') as f:
     json.dump(published, f, ensure_ascii=False, indent=2)
 
-print(f"\n==> {len(published)} clips publicados!")
+print(f"\n==> {len(published)} clips published!")
 PYEOF
 else
-  echo "==> [5/5] Publicação pulada (use --publish para publicar)"
+  echo "==> [5/5] Publishing skipped (use --publish to publish)"
 fi
 
 echo ""
-echo "==> Concluído! Arquivos em: $JOB_DIR"
-echo "    - topics.json: tópicos identificados"
-echo "    - clips/: vídeos cortados"
+echo "==> Done! Files at: $JOB_DIR"
+echo "    - topics.json: identified topics"
+echo "    - clips/: cut videos"
 if [[ "$PUBLISH" == "true" ]]; then
-  echo "    - published.json: links dos vídeos publicados"
+  echo "    - published.json: links to published videos"
 fi

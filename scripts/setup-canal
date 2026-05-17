@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# setup-canal — Parte 2: cria nova instancia (= novo canal) a partir do template
+# setup-canal — Part 2: creates a new instance (= new channel) from the template
 #
-# Roda 1x por canal. Copia este template para ~/projetos/<nome>/, gera .env,
-# patcha service files, sobe dashboard, pausa pro OAuth, sobe scheduler.
+# Runs once per channel. Copies this template to ~/projetos/<name>/, generates .env,
+# patches service files, starts dashboard, pauses for OAuth, starts scheduler.
 #
-# Em qualquer pergunta com [default] mostrado, ENTER aceita o default.
+# For any prompt with [default] shown, ENTER accepts the default.
 set -euo pipefail
 
 TEMPLATE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -12,13 +12,13 @@ echo "==> setup-canal"
 echo "    Template: $TEMPLATE_DIR"
 echo ""
 
-# ============= A. Identidade =============
-read -rp "Nome da instancia (ex: yt-pub-lives7): " NOME
-[ -z "$NOME" ] && { echo "ERRO: nome obrigatorio"; exit 1; }
+# ============= A. Identity =============
+read -rp "Instance name (ex: yt-pub-lives7): " NOME
+[ -z "$NOME" ] && { echo "ERROR: name is required"; exit 1; }
 DEST="$HOME/projetos/$NOME"
-[ -e "$DEST" ] && { echo "ERRO: $DEST ja existe"; exit 1; }
+[ -e "$DEST" ] && { echo "ERROR: $DEST already exists"; exit 1; }
 
-# Numero da instancia (usado nos nomes dos services)
+# Instance number (used in service names)
 if [[ "$NOME" =~ ([0-9]+)$ ]]; then
   N="${BASH_REMATCH[1]}"
 else
@@ -29,103 +29,147 @@ else
     [[ "$n" =~ ^[0-9]+$ ]] && (( n > MAX )) && MAX=$n
   done
   SUG_N=$((MAX + 1))
-  read -rp "Numero da instancia (services) [$SUG_N]: " N
+  read -rp "Instance number (services) [$SUG_N]: " N
   N=${N:-$SUG_N}
 fi
 
-# Porta — sugere proxima livre 8091..8099
+# Port — suggest next free port 8091..8099
 SUG=""
 for p in $(seq 8091 8099); do
   ss -ltn 2>/dev/null | grep -q ":$p " || { SUG=$p; break; }
 done
 [ -z "$SUG" ] && SUG=8091
-read -rp "Porta do dashboard [$SUG]: " PORTA
+read -rp "Dashboard port [$SUG]: " PORTA
 PORTA=${PORTA:-$SUG}
 ss -ltn 2>/dev/null | grep -q ":$PORTA " && {
-  echo "ERRO: porta $PORTA ja em uso"; exit 1; }
+  echo "ERROR: port $PORTA already in use"; exit 1; }
 
 # ============= B. YouTube =============
-read -rp "YOUTUBE_CHANNEL_ID origem [UC2QbQDyPKuHk93dwo5iq3Sw]: " ORIG
+read -rp "Source YOUTUBE_CHANNEL_ID [UC2QbQDyPKuHk93dwo5iq3Sw]: " ORIG
 ORIG=${ORIG:-UC2QbQDyPKuHk93dwo5iq3Sw}
-read -rp "Handle do canal de destino (opcional, ex: @InemaTIA): " DEST_HANDLE
+read -rp "Destination channel handle (optional, ex: @InemaTIA): " DEST_HANDLE
 
 # ============= C. Google Cloud =============
 echo ""
-echo "    -- Credenciais Google Cloud (1 projeto por instancia) --"
+echo "    -- Google Cloud credentials (1 project per instance) --"
 read -rp "CLIENT_ID: " CLIENT_ID
-[ -z "$CLIENT_ID" ] && { echo "ERRO: CLIENT_ID obrigatorio"; exit 1; }
+[ -z "$CLIENT_ID" ] && { echo "ERROR: CLIENT_ID is required"; exit 1; }
 read -rp "CLIENT_SECRET: " CLIENT_SECRET
-[ -z "$CLIENT_SECRET" ] && { echo "ERRO: CLIENT_SECRET obrigatorio"; exit 1; }
+[ -z "$CLIENT_SECRET" ] && { echo "ERROR: CLIENT_SECRET is required"; exit 1; }
 read -rp "API_KEY: " API_KEY
-[ -z "$API_KEY" ] && { echo "ERRO: API_KEY obrigatoria"; exit 1; }
+[ -z "$API_KEY" ] && { echo "ERROR: API_KEY is required"; exit 1; }
 read -rp "GCP_PROJECT: " GCP_PROJECT
-[ -z "$GCP_PROJECT" ] && { echo "ERRO: GCP_PROJECT obrigatorio"; exit 1; }
+[ -z "$GCP_PROJECT" ] && { echo "ERROR: GCP_PROJECT is required"; exit 1; }
 
-# ============= D. IA =============
+# ============= D. AI =============
 echo ""
 read -rp "PIRAMYD_API_KEY: " PIRAMYD_API_KEY
-[ -z "$PIRAMYD_API_KEY" ] && { echo "ERRO: PIRAMYD_API_KEY obrigatoria"; exit 1; }
+[ -z "$PIRAMYD_API_KEY" ] && { echo "ERROR: PIRAMYD_API_KEY is required"; exit 1; }
 
-# ============= E. Senha do dashboard =============
+# ============= E. Dashboard password =============
 echo ""
-read -rp "Senha do dashboard [Inema2026\$\$\$]: " DASHBOARD_PASSWORD
+read -rp "Dashboard password [Inema2026\$\$\$]: " DASHBOARD_PASSWORD
 [ -z "$DASHBOARD_PASSWORD" ] && DASHBOARD_PASSWORD='Inema2026$$$'
 
-# ============= F. Operacao =============
-read -rp "Adicionar ao sync-instances do template? [s/N]: " SYNC
+# ============= F. Validacao de credenciais =============
+echo ""
+echo "==> Validating credentials..."
 
-# ============= Resumo + confirmacao =============
+# CLIENT_ID format
+if [[ "$CLIENT_ID" != *.apps.googleusercontent.com ]]; then
+  echo "  WARNING: CLIENT_ID does not end with .apps.googleusercontent.com"
+  echo "           Expected format: <numbers>-<hash>.apps.googleusercontent.com"
+  read -rp "  Continue anyway? [s/N]: " _PROCEED
+  [[ "${_PROCEED:-n}" =~ ^[sSyY]$ ]] || { echo "Cancelled."; exit 1; }
+fi
+
+# CLIENT_SECRET format
+if [[ "$CLIENT_SECRET" != GOCSPX-* ]]; then
+  echo "  WARNING: CLIENT_SECRET does not start with GOCSPX-"
+  read -rp "  Continue anyway? [s/N]: " _PROCEED
+  [[ "${_PROCEED:-n}" =~ ^[sSyY]$ ]] || { echo "Cancelled."; exit 1; }
+fi
+
+# API_KEY live test (non-blocking on network failure)
+# Validate ORIG format before interpolating into URL
+if [[ ! "$ORIG" =~ ^UC[A-Za-z0-9_-]{22}$ ]]; then
+  echo "  WARNING: ORIG channel ID format unexpected (expected ^UC[A-Za-z0-9_-]{22}$), skipping API_KEY test"
+else
+  echo -n "  Testing API_KEY against YouTube... "
+  _API_TEST=$(curl -sf --max-time 10 \
+    "https://www.googleapis.com/youtube/v3/channels?part=id&id=${ORIG}&key=${API_KEY}" \
+    2>/dev/null || echo "__CURL_FAILED__")
+
+  if [ "$_API_TEST" = "__CURL_FAILED__" ]; then
+    echo "no network (skipping)"
+  elif echo "$_API_TEST" | python3 -c "import sys,json,sys; sys.exit(0 if 'error' in json.load(sys.stdin) else 1)" 2>/dev/null; then
+    _ERR_MSG=$(echo "$_API_TEST" | python3 -c \
+      "import sys,json; d=json.load(sys.stdin); print(d.get('error',{}).get('message','unknown'))" \
+      2>/dev/null || echo "unknown")
+    echo "FAILED"
+    echo "  ERROR: API_KEY rejected by YouTube: $_ERR_MSG"
+    read -rp "  Continue anyway? [s/N]: " _PROCEED
+    [[ "${_PROCEED:-n}" =~ ^[sSyY]$ ]] || { echo "Cancelled."; exit 1; }
+  else
+    echo "OK"
+  fi
+fi
+
+# ============= G. Operation =============
+read -rp "Add to template sync-instances? [y/N]: " SYNC
+
+# ============= Summary + confirmation =============
 echo ""
 cat <<INFO
-==> Resumo:
-    Instancia: $NOME (numero: $N)
-    Destino:   $DEST
-    Porta:     $PORTA
-    Origem:    $ORIG
-    Canal:     ${DEST_HANDLE:-<nao informado>}
+==> Summary:
+    Instance:  $NOME (number: $N)
+    Dest:      $DEST
+    Port:      $PORTA
+    Source:    $ORIG
+    Channel:   ${DEST_HANDLE:-<not provided>}
     GCP:       $GCP_PROJECT
 INFO
-read -rp "Confirma? [S/n]: " OK
-[[ "${OK:-s}" =~ ^[sSyY]$ ]] || { echo "Cancelado."; exit 0; }
+read -rp "Confirm? [Y/n]: " OK
+[[ "${OK:-s}" =~ ^[sSyY]$ ]] || { echo "Cancelled."; exit 1; }
 
-# ============= 1. Copia template =============
+# ============= 1. Copy template =============
 echo ""
-echo "==> Copiando template..."
+echo "==> Copying template..."
 cp -r "$TEMPLATE_DIR" "$DEST"
 
-# Limpa estado especifico/sensivel
+# Remove instance-specific/sensitive state
 rm -rf "$DEST/data" "$DEST/lives" "$DEST/.git"
 rm -f  "$DEST/config/.env" \
        "$DEST/config/credentials.enc" \
        "$DEST/config/.encryption_key"
 
-# ============= 2. Gera config/.env =============
-# OBS: gerado via heredoc, nao via Write — segue regra do CLAUDE.md
+# ============= 2. Generate config/.env =============
+# NOTE: generated via heredoc, not via Write — follows CLAUDE.md rule
 cat > "$DEST/config/.env" <<EOF
-# Canal de ORIGEM (de onde vem as lives)
+# SOURCE channel (where lives come from)
 YOUTUBE_CHANNEL_ID=$ORIG
 
-# Canal de DESTINO — credenciais Google Cloud (1 projeto por instancia)
+# DESTINATION channel — Google Cloud credentials (1 project per instance)
 CLIENT_ID=$CLIENT_ID
 CLIENT_SECRET=$CLIENT_SECRET
 API_KEY=$API_KEY
 GCP_PROJECT=$GCP_PROJECT
 
-# IA
+# AI
 PIRAMYD_API_KEY=$PIRAMYD_API_KEY
 
-# Identificacao
+# Identification
 INSTANCE_NAME=$NOME
 
-# Senha de acesso ao dashboard web
+# Dashboard web access password
 DASHBOARD_PASSWORD=$DASHBOARD_PASSWORD
 EOF
 chmod 600 "$DEST/config/.env"
-echo "    config/.env criado (chmod 600)"
+echo "    config/.env created (chmod 600)"
 
-# ============= 3. Patcha service files =============
-# Os services do template tem placeholders __INSTANCE_DIR__, __INSTANCE_NAME__,
-# __INSTANCE_NUM__ e __PORT__ — substituidos pelos valores reais aqui.
+# ============= 3. Patch service files =============
+# Template services have placeholders __INSTANCE_DIR__, __INSTANCE_NAME__,
+# __INSTANCE_NUM__ and __PORT__ — replaced with real values here.
 DASH_SVC="$DEST/systemd/yt-dashboard.service"
 SCHED_SVC="$DEST/systemd/yt-scheduler.service"
 
@@ -136,54 +180,54 @@ sed -i \
   -e "s|__PORT__|$PORTA|g" \
   "$DASH_SVC" "$SCHED_SVC"
 
-# Remove User= se existir (user services nao precisam)
+# Remove User= if present (user services don't need it)
 sed -i '/^User=/d' "$DASH_SVC" "$SCHED_SVC"
 
-# ============= 4. Symlinks systemd user =============
+# ============= 4. Systemd user symlinks =============
 SDIR="$HOME/.config/systemd/user"
 mkdir -p "$SDIR"
 ln -sf "$DASH_SVC"  "$SDIR/yt-dashboard${N}.service"
 ln -sf "$SCHED_SVC" "$SDIR/yt-scheduler${N}.service"
 systemctl --user daemon-reload
 
-# Sobe dashboard primeiro (scheduler depende do OAuth)
+# Start dashboard first (scheduler depends on OAuth)
 systemctl --user enable --now "yt-dashboard${N}"
 echo "    yt-dashboard${N}: ativo em http://localhost:$PORTA"
 
-# ============= 5. OAuth (interativo) =============
+# ============= 5. OAuth (interactive) =============
 echo ""
-echo "==> Autentique o canal de destino no Google."
-echo "    Em outro terminal, rode:"
+echo "==> Authenticate the destination channel with Google."
+echo "    In another terminal, run:"
 echo ""
 echo "    GWS_CONFIG_DIR=$DEST/config python3 $DEST/scripts/yt-auth"
 echo ""
-echo "    O script vai abrir um link — autorize com a conta dona do canal."
-read -rp "Pressione ENTER apos completar o OAuth (ou Ctrl+C para abortar)..."
+echo "    The script will open a link — authorize with the channel owner account."
+read -rp "Press ENTER after completing OAuth (or Ctrl+C to abort)..."
 
 if [ ! -f "$DEST/config/credentials.enc" ]; then
   echo ""
-  echo "AVISO: $DEST/config/credentials.enc nao foi criado."
-  echo "       O scheduler vai falhar ate o OAuth ser concluido."
-  echo "       Voce pode rodar yt-auth depois e iniciar com:"
-  echo "         systemctl --user start yt-scheduler${N}"
+  echo "WARNING: $DEST/config/credentials.enc was not created."
+  echo "         The scheduler will fail until OAuth is completed."
+  echo "         You can run yt-auth later and start with:"
+  echo "           systemctl --user start yt-scheduler${N}"
 fi
 
-# ============= 6. Sobe scheduler =============
+# ============= 6. Start scheduler =============
 systemctl --user enable --now "yt-scheduler${N}" || \
-  echo "AVISO: scheduler falhou ao subir — verifique OAuth."
+  echo "WARNING: scheduler failed to start — check OAuth."
 
-# ============= 7. sync-instances (opcional) =============
+# ============= 7. sync-instances (optional) =============
 if [[ "$SYNC" =~ ^[sSyY]$ ]]; then
   SI="$TEMPLATE_DIR/scripts/sync-instances"
   if grep -q "\"$DEST\"" "$SI"; then
-    echo "    $DEST ja registrado em sync-instances"
+    echo "    $DEST already registered in sync-instances"
   else
     sed -i "/^TARGETS=(/a\\    \"$DEST\"" "$SI"
-    echo "    Adicionado a $SI"
+    echo "    Added to $SI"
   fi
 fi
 
-# ============= 8. Registra no master-dashboard/instances.json =============
+# ============= 8. Register in master-dashboard/instances.json =============
 INSTANCES_JSON="$TEMPLATE_DIR/master-dashboard/instances.json"
 python3 - "$INSTANCES_JSON" "$N" "$NOME" "$DEST" "$PORTA" <<'PY'
 import json, os, sys
@@ -206,15 +250,15 @@ data.append({
 })
 data.sort(key=lambda d: d['id'])
 json.dump(data, open(path, 'w'), indent=2, ensure_ascii=False)
-print(f'    {path} atualizado ({len(data)} instancias)')
+print(f'    {path} updated ({len(data)} instances)')
 PY
-# Recarrega master pra ler o JSON novo
+# Reload master to pick up new JSON
 systemctl --user restart yt-master-dashboard 2>/dev/null \
   && echo "    yt-master-dashboard reiniciado"
 
-# ============= Fim =============
+# ============= Done =============
 echo ""
-echo "==> Pronto."
+echo "==> Done."
 echo "    Dashboard: http://localhost:$PORTA"
 echo "    Master:    http://localhost:8090"
 echo "    Logs:      journalctl --user -u yt-dashboard${N} -f"
