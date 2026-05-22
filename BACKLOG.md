@@ -1,5 +1,17 @@
 # BACKLOG — yt-pub-livesx
 
+## Next 5 Priorities
+
+1. **[P1] Architecture review — multi-instance scalability** — audit `sync-instances`, OAuth callback registration, and shared state behavior as instances scale; produce findings doc
+2. **[P1] Architecture diagram — multi-instance setup** — ASCII diagram covering instances, scheduler, dashboards, master-dashboard polling, and sync flow (`docs/`)
+3. **[P1] `sync-instances` docs + `--dry-run` flag** — clarify TARGETS opt-in/opt-out handling, never-sync list; add preview mode so operators can review before applying
+4. **[P2] Watchdog / auto-restart for silent scheduler death** — verify systemd `Restart=on-failure` is set; add liveness probe against existing `/api/health/ping`
+5. **[P2] Per-instance log rotation** — add logrotate config for scheduler and dashboard logs to prevent unbounded growth
+
+_Last updated: 2026-05-19_
+
+---
+
 ## Security (High Priority)
 
 - [x] Add rate limiting to `/api/login` (brute force protection) — sliding window, 5 attempts / 5 min per IP, `Retry-After` header on 429
